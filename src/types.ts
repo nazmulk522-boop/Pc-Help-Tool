@@ -1,4 +1,5 @@
 export type ActiveTool = 
+  | 'home'
   | 'voter_search'
   | 'nid'
   | 'bg_remover'
@@ -6,6 +7,22 @@ export type ActiveTool =
   | 'print_sheet'
   | 'job_resizer'
   | 'quick_doc';
+
+export type UserRole = 'super_admin' | 'shop_owner' | 'guest';
+
+export interface ShopProfile {
+  shopId: string;
+  ownerEmail: string;
+  ownerName: string;
+  shopName: string;
+  tagline?: string;
+  phone?: string;
+  address?: string;
+  customLogo?: string;
+  role: UserRole;
+  createdAt?: string;
+  updatedAt?: string;
+}
 
 export interface VoterRecord {
   id: string;

@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  Home,
   CreditCard, 
   Palette, 
   Users, 
@@ -7,23 +8,27 @@ import {
   FileCheck, 
   Receipt, 
   Printer, 
-  Laptop,
-  Layers,
-  Settings,
-  History,
-  Sparkles,
-  Scissors,
   Search,
-  ShieldCheck
+  ShieldCheck,
+  Store,
+  Sparkles
 } from 'lucide-react';
 import { ActiveTool } from '../types';
+import { useShopAuth } from '../context/ShopAuthContext';
 
 interface SidebarProps {
   activeTool: ActiveTool;
   setActiveTool: (tool: ActiveTool) => void;
+  onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTool, setActiveTool }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ 
+  activeTool, 
+  setActiveTool,
+  onOpenLoginModal 
+}) => {
+  const { currentProfile, isLoggedIn, isSuperAdmin } = useShopAuth();
+
   const voterTools: Array<{
     id: ActiveTool;
     nameBn: string;
@@ -92,24 +97,54 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTool, setActiveTool }) =
 
   return (
     <aside className="w-64 bg-slate-900 text-white flex flex-col border-r border-slate-800 shrink-0 select-none h-screen sticky top-0">
-      {/* Brand Header */}
-      <div className="p-3.5 border-b border-slate-800 bg-blue-600 font-bold text-base flex items-center justify-between text-white shadow-xs">
-        <div className="flex items-center gap-2.5">
-          <span className="w-7 h-7 bg-white text-blue-600 rounded-md font-black flex items-center justify-center text-xs shadow-xs">
-            QC
+      {/* Brand Header with Dynamic Shop Name */}
+      <div 
+        onClick={() => onOpenLoginModal && onOpenLoginModal(isLoggedIn ? 'profile' : 'shop_login')}
+        className="p-3.5 border-b border-slate-800 bg-gradient-to-r from-blue-700 to-blue-600 font-bold text-base flex items-center justify-between text-white shadow-xs cursor-pointer hover:brightness-105 transition"
+        title="দোকানের নাম পরিবর্তন করতে ক্লিক করুন"
+      >
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className="w-7 h-7 bg-white text-blue-600 rounded-md font-black flex items-center justify-center text-xs shadow-xs shrink-0">
+            {isSuperAdmin ? '👑' : '🏪'}
           </span>
-          <div className="leading-tight">
-            <span className="text-sm font-black tracking-tight block">QuickShop Dokan</span>
-            <span className="text-[10px] text-blue-100 font-normal block opacity-90">ডিজিটাল স্টুডিও টুলকিট</span>
+          <div className="leading-tight truncate">
+            <span className="text-xs font-black tracking-tight block truncate text-white">
+              {currentProfile.shopName}
+            </span>
+            <span className="text-[10px] text-blue-100 font-normal block opacity-90 truncate">
+              {isLoggedIn ? currentProfile.ownerName : 'ডিজিটাল স্টুডিও টুলকিট'}
+            </span>
           </div>
         </div>
-        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-700/80 border border-blue-400/30 text-white font-mono">
+        <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-800/80 border border-blue-400/30 text-white font-mono shrink-0">
           v2.5
         </span>
       </div>
 
       {/* Navigation Groups */}
-      <nav className="flex-1 py-3 text-xs overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-slate-700">
+      <nav className="flex-1 py-2.5 text-xs overflow-y-auto space-y-3.5 scrollbar-thin scrollbar-thumb-slate-700">
+        {/* Primary Home / Dashboard Link */}
+        <div className="px-2">
+          <button
+            onClick={() => setActiveTool('home')}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors text-xs font-bold ${
+              activeTool === 'home'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'text-slate-200 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Home className={`w-4 h-4 shrink-0 ${activeTool === 'home' ? 'text-white' : 'text-blue-400'}`} />
+              <span>হোমপেজ (টুলস গ্যালারি)</span>
+            </div>
+            <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+              activeTool === 'home' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-400'
+            }`}>
+              মেনু
+            </span>
+          </button>
+        </div>
+
         {/* Section 0: Voter Hub */}
         <div>
           <div className="px-4 py-1 text-slate-400 text-[10px] uppercase tracking-wider font-bold">
@@ -231,23 +266,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTool, setActiveTool }) =
         </div>
       </nav>
 
-      {/* System Status Footer */}
-      <div className="p-3.5 bg-slate-950 text-[11px] text-slate-400 border-t border-slate-800 space-y-1">
-        <div className="flex items-center justify-between">
-          <span>Server Status:</span>
-          <span className="text-emerald-400 font-medium flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            Online
+      {/* Profile & Shop Settings Link */}
+      <div className="p-3 bg-slate-950/90 border-t border-slate-800 text-xs">
+        <button
+          onClick={() => onOpenLoginModal && onOpenLoginModal(isLoggedIn ? 'profile' : 'shop_login')}
+          className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-white transition"
+        >
+          <div className="flex items-center gap-2 truncate">
+            {isSuperAdmin ? (
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+            ) : (
+              <Store className="w-4 h-4 text-blue-400 shrink-0" />
+            )}
+            <span className="truncate font-semibold">
+              {isLoggedIn ? 'দোকান প্রোফাইল' : 'দোকান / এডমিন লগইন'}
+            </span>
+          </div>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-300 font-bold">
+            {isLoggedIn ? 'এডিট' : 'লগইন'}
           </span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span>Printer: L805/L3110</span>
-          <span className="text-emerald-400 font-medium">Connected</span>
-        </div>
-        <div className="flex items-center justify-between pt-1 border-t border-slate-850 text-[10px] text-slate-500">
-          <span>Resolution:</span>
-          <span className="text-slate-300 font-mono">300 DPI High-Res</span>
-        </div>
+        </button>
       </div>
     </aside>
   );

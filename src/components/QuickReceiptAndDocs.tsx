@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useShopAuth } from '../context/ShopAuthContext';
 import { 
   Receipt, 
   FileText, 
@@ -22,16 +23,23 @@ interface ReceiptItem {
 }
 
 export const QuickReceiptAndDocs: React.FC = () => {
+  const { currentProfile } = useShopAuth();
   const [activeSubTab, setActiveSubTab] = useState<'receipt' | 'doc_templates'>('receipt');
 
-  // Receipt State
-  const [shopName, setShopName] = useState('মা কম্পিউটার পয়েন্ট & ডিজিটাল স্টুডিও');
-  const [shopAddress, setShopAddress] = useState('কলেজ রোড, থানা মোড়, সদর');
-  const [shopMobile, setShopMobile] = useState('০১৭১২-৩৪৫৬৭৮');
+  // Receipt State - Initialized from active Shop Profile
+  const [shopName, setShopName] = useState(currentProfile.shopName);
+  const [shopAddress, setShopAddress] = useState(currentProfile.address || 'থানা রোড, সদর বাজার');
+  const [shopMobile, setShopMobile] = useState(currentProfile.phone || '০১৭১২-৩৪৫৬৭৮');
   const [customerName, setCustomerName] = useState('মোঃ সুমন আহমেদ');
   const [customerPhone, setCustomerPhone] = useState('০১৮১১-২২৩৩৪৪');
   const [receiptNo, setReceiptNo] = useState(() => `REC-${Math.floor(1000 + Math.random() * 9000)}`);
   const [dateStr, setDateStr] = useState(() => new Date().toISOString().split('T')[0]);
+
+  useEffect(() => {
+    setShopName(currentProfile.shopName);
+    if (currentProfile.address) setShopAddress(currentProfile.address);
+    if (currentProfile.phone) setShopMobile(currentProfile.phone);
+  }, [currentProfile]);
 
   const [items, setItems] = useState<ReceiptItem[]>([
     { id: '1', description: 'পাসপোর্ট সাইজ ছবি ৪R শিট প্রিন্ট', qty: 1, rate: 50 },

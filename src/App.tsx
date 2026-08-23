@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { ActiveTool, PrintItem } from './types';
+import { ShopAuthProvider, useShopAuth } from './context/ShopAuthContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { HomePage } from './components/HomePage';
 import { VoterInfoSearch } from './components/VoterInfoSearch';
 import { NidCropJoin } from './components/NidCropJoin';
 import { BackgroundRemover } from './components/BackgroundRemover';
@@ -9,13 +11,25 @@ import { JointPhotoMaker } from './components/JointPhotoMaker';
 import { PhotoPrintSheet } from './components/PhotoPrintSheet';
 import { JobApplicationResizer } from './components/JobApplicationResizer';
 import { QuickReceiptAndDocs } from './components/QuickReceiptAndDocs';
-import { Zap, Printer, Sparkles, X } from 'lucide-react';
+import { LoginProfileModal } from './components/LoginProfileModal';
+import { Zap, X } from 'lucide-react';
 
-export default function App() {
-  const [activeTool, setActiveTool] = useState<ActiveTool>('voter_search');
+function MainApp() {
+  const [activeTool, setActiveTool] = useState<ActiveTool>('home');
   const [printSheetItems, setPrintSheetItems] = useState<PrintItem[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [taskKey, setTaskKey] = useState(0);
+
+  // Login / Profile Modal State
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [loginModalTab, setLoginModalTab] = useState<'shop_login' | 'admin_login' | 'profile'>('shop_login');
+
+  const { currentProfile } = useShopAuth();
+
+  const handleOpenLoginModal = (tab: 'shop_login' | 'admin_login' | 'profile' = 'shop_login') => {
+    setLoginModalTab(tab);
+    setLoginModalOpen(true);
+  };
 
   // Callback when a tool sends an edited image directly to the Print Sheet tool
   const handleSendToPrintSheet = (imageUrl: string, type: 'passport' | 'stamp' | 'joint') => {
@@ -40,7 +54,11 @@ export default function App() {
     <div className="flex min-h-screen bg-[#f8fafc] text-slate-900 font-sans selection:bg-blue-600 selection:text-white">
       {/* Desktop Sticky Sidebar */}
       <div className="hidden md:block">
-        <Sidebar activeTool={activeTool} setActiveTool={setActiveTool} />
+        <Sidebar 
+          activeTool={activeTool} 
+          setActiveTool={setActiveTool} 
+          onOpenLoginModal={handleOpenLoginModal}
+        />
       </div>
 
       {/* Mobile Drawer Sidebar */}
@@ -66,6 +84,10 @@ export default function App() {
                 setActiveTool(tool);
                 setMobileSidebarOpen(false);
               }}
+              onOpenLoginModal={(tab) => {
+                setMobileSidebarOpen(false);
+                handleOpenLoginModal(tab);
+              }}
             />
           </div>
         </div>
@@ -76,12 +98,20 @@ export default function App() {
         {/* High Density Top Header */}
         <Header
           activeTool={activeTool}
+          setActiveTool={setActiveTool}
           onResetTask={handleResetTask}
           onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
+          onOpenLoginModal={handleOpenLoginModal}
         />
 
         {/* Dynamic Tool Content */}
         <main key={taskKey} className="flex-1 p-3.5 sm:p-5 max-w-[1400px] w-full mx-auto space-y-4">
+          {activeTool === 'home' && (
+            <HomePage 
+              onSelectTool={(tool) => setActiveTool(tool)} 
+              onOpenLoginModal={handleOpenLoginModal}
+            />
+          )}
           {activeTool === 'voter_search' && <VoterInfoSearch />}
           {activeTool === 'nid' && <NidCropJoin />}
           {activeTool === 'bg_remover' && (
@@ -102,7 +132,7 @@ export default function App() {
           <div className="max-w-[1400px] mx-auto flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Zap className="w-3.5 h-3.5 text-blue-600" />
-              <span className="text-slate-800 font-semibold">কম্পিউটার শপ ও স্টুডিও টুলকিট:</span>
+              <span className="text-slate-800 font-semibold">{currentProfile.shopName}:</span>
               <span className="hidden sm:inline text-slate-600">
                 ভোটার তথ্য যাচাই, এনআইডি ক্রপ-জয়েন, পাসপোর্ট ব্যাকগ্রাউন্ড কালার, ৪R শিট প্রিন্ট ও সরকারি জব রিসাইজার।
               </span>
@@ -116,6 +146,21 @@ export default function App() {
           </div>
         </footer>
       </div>
+
+      {/* Login & Shop Profile Modal */}
+      <LoginProfileModal
+        isOpen={loginModalOpen}
+        onClose={() => setLoginModalOpen(false)}
+        initialTab={loginModalTab}
+      />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ShopAuthProvider>
+      <MainApp />
+    </ShopAuthProvider>
   );
 }
