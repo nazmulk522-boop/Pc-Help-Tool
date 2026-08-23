@@ -69,6 +69,11 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({ onSendToPr
 
   // Print Preview
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState<boolean>(false);
+  const [clientApiKey, setClientApiKey] = useState<string>(() => {
+    return (typeof window !== 'undefined' ? localStorage.getItem('remove_bg_api_key') || '' : '');
+  });
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   // Canvas Refs
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -319,6 +324,15 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({ onSendToPr
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowApiKeyModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold shadow-xs transition"
+            title="Remove.bg API Key বা Vercel সেটিংস"
+          >
+            <Key className="w-3.5 h-3.5 text-blue-600" />
+            <span>API সেটিংস / Vercel</span>
+          </button>
+
+          <button
             onClick={() => setShowPrintModal(true)}
             className="inline-flex items-center gap-2 px-4 py-1.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition"
           >
@@ -516,9 +530,23 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({ onSendToPr
 
           {/* Feedback Status */}
           {apiSourceInfo && (
-            <div className="p-2.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-fadeIn">
-              <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{apiSourceInfo}</span>
+            <div className={`p-2.5 rounded text-xs font-semibold flex items-center justify-between gap-2 animate-fadeIn ${
+              apiSourceInfo.includes('Remove.bg')
+                ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                : 'bg-amber-50 border border-amber-200 text-amber-900'
+            }`}>
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{apiSourceInfo}</span>
+              </div>
+              {!apiSourceInfo.includes('Remove.bg') && (
+                <button
+                  onClick={() => setShowApiKeyModal(true)}
+                  className="px-2 py-1 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 text-[11px] font-bold shrink-0 transition"
+                >
+                  API কী সেট করুন ⚙️
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -745,6 +773,111 @@ export const BackgroundRemover: React.FC<BackgroundRemoverProps> = ({ onSendToPr
         paperSize="4R"
         orientation="portrait"
       />
+
+      {/* API Key & Vercel Setup Modal */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Key className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-sm">Remove.bg API ও Vercel ডিপ্লয়মেন্ট গাইড</h3>
+              </div>
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                className="text-slate-400 hover:text-white text-lg font-bold px-2 py-0.5 rounded"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs text-slate-700 max-h-[80vh] overflow-y-auto">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-900 space-y-1">
+                <p className="font-bold text-xs">💡 Vercel-এ কেন সমস্যা হচ্ছিল?</p>
+                <p className="text-[11px] leading-relaxed">
+                  AI Studio প্রিভিউতে সার্ভার স্বয়ংক্রিয়ভাবে Remove.bg API ব্যবহার করে। কিন্তু গিটহাব থেকে Vercel-এ ডিপ্লয় করার পর Vercel-এর Environment Variables-এ <code>REMOVE_BG_API_KEY</code> যুক্ত না থাকলে অ্যাপটি ব্রাউজারের সাধারণ কালার ফিল্টারে চলে যায়, ফলে নীল শার্টের কালার কেটে যায়।
+                </p>
+              </div>
+
+              {/* Instant Browser API Key Setup */}
+              <div className="space-y-2 border border-slate-200 rounded-lg p-3.5 bg-slate-50">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 text-xs">
+                    ১. ব্রাউজারে Remove.bg ফ্রি API Key সেভ করুন (তাত্ক্ষণিক কাজ করবে):
+                  </label>
+                  <a
+                    href="https://www.remove.bg/api#api-pricing"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-blue-600 hover:underline text-[11px] font-bold"
+                  >
+                    ফ্রি Key নিন ↗
+                  </a>
+                </div>
+                <input
+                  type="password"
+                  value={clientApiKey}
+                  onChange={(e) => setClientApiKey(e.target.value)}
+                  placeholder="আপনার Remove.bg API Key এখানে পেস্ট করুন"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                />
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-slate-500">
+                    এটি আপনার ব্রাউজারের লোকাল স্টোরেজে নিরাপদে সংরক্ষিত থাকবে।
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (clientApiKey.trim()) {
+                        localStorage.setItem('remove_bg_api_key', clientApiKey.trim());
+                        setSaveSuccessMsg('API Key সফলভাবে সেভ হয়েছে!');
+                        setTimeout(() => setSaveSuccessMsg(null), 3000);
+                        if (originalImage) {
+                          executeBackgroundRemoval(originalImage);
+                        }
+                      } else {
+                        localStorage.removeItem('remove_bg_api_key');
+                        setSaveSuccessMsg('API Key মুছে ফেলা হয়েছে।');
+                        setTimeout(() => setSaveSuccessMsg(null), 3000);
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded shadow-xs transition"
+                  >
+                    সেভ ও প্রয়োগ করুন
+                  </button>
+                </div>
+                {saveSuccessMsg && (
+                  <div className="p-2 rounded bg-emerald-100 text-emerald-800 font-bold text-[11px] text-center">
+                    {saveSuccessMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* Vercel Environment Variables Instruction */}
+              <div className="space-y-2 border border-slate-200 rounded-lg p-3.5 bg-white">
+                <p className="font-bold text-slate-800 text-xs">
+                  ২. Vercel সার্ভারে পার্মানেন্টলি সেট করতে:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-600">
+                  <li>Vercel ড্যাশবোর্ডে আপনার <strong>pc-help-tool</strong> প্রোজেক্টে যান।</li>
+                  <li><strong>Settings</strong> ➔ <strong>Environment Variables</strong> ট্যাবে ক্লিক করুন।</li>
+                  <li><strong>Key:</strong> <code className="bg-slate-100 px-1 py-0.5 rounded text-blue-700 font-bold">REMOVE_BG_API_KEY</code> এবং <strong>Value:</strong> তে আপনার API Key দিন।</li>
+                  <li>(ঐচ্ছিক) <code className="bg-slate-100 px-1 py-0.5 rounded text-blue-700 font-bold">GEMINI_API_KEY</code> দিন।</li>
+                  <li><strong>Save</strong> করে প্রোজেক্টটি <strong>Redeploy</strong> করুন।</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-100 border-t border-slate-200 flex justify-end">
+              <button
+                onClick={() => setShowApiKeyModal(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded"
+              >
+                বন্ধ করুন
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

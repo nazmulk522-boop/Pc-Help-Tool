@@ -69,13 +69,11 @@ export function removeBackgroundCanvas(
   const imgData = srcCtx.getImageData(0, 0, width, height);
   const data = imgData.data;
 
-  // Sample background colors from outer borders and corners
+  // Sample background colors from outer top and side edges
   const sampleColors: Array<[number, number, number]> = [];
-  const corners = [
+  const edgeSamples = [
     [2, 2],
     [width - 3, 2],
-    [2, height - 3],
-    [width - 3, height - 3],
     [Math.floor(width / 2), 2],
     [Math.floor(width / 4), 2],
     [Math.floor((width * 3) / 4), 2],
@@ -85,82 +83,112 @@ export function removeBackgroundCanvas(
     [width - 3, Math.floor(height / 2)],
   ];
 
-  for (const [cx, cy] of corners) {
+  for (const [cx, cy] of edgeSamples) {
     const safeX = Math.max(0, Math.min(width - 1, cx));
     const safeY = Math.max(0, Math.min(height - 1, cy));
     const idx = (safeY * width + safeX) * 4;
     sampleColors.push([data[idx], data[idx + 1], data[idx + 2]]);
   }
 
-  // Alpha mask array
+  // Alpha mask array: default all 255 (keep foreground)
   const mask = new Uint8Array(width * height);
+  mask.fill(255);
+
+  // Helper to calculate color distance
+  const colorDist = (r: number, g: number, b: number, sr: number, sg: number, sb: number) => {
+    return Math.sqrt(
+      Math.pow(r - sr, 2) * 0.3 +
+      Math.pow(g - sg, 2) * 0.59 +
+      Math.pow(b - sb, 2) * 0.11
+    );
+  };
+
+  // Connected Flood-Fill Queue from outer boundary
+  const visited = new Uint8Array(width * height);
+  const queue: number[] = [];
+
+  // Seed boundary pixels (top row, left column, right column)
+  for (let x = 0; x < width; x++) {
+    queue.push(0 * width + x); // Top edge
+    visited[0 * width + x] = 1;
+  }
+  for (let y = 0; y < height; y++) {
+    queue.push(y * width + 0); // Left edge
+    visited[y * width + 0] = 1;
+    queue.push(y * width + (width - 1)); // Right edge
+    visited[y * width + (width - 1)] = 1;
+  }
 
   // Helper to detect human skin tones (protect face and neck from being cut)
   const isSkinTone = (r: number, g: number, b: number): boolean => {
     return (
-      r > 60 &&
-      g > 40 &&
+      r > 55 &&
+      g > 35 &&
       b > 20 &&
       r > g &&
       r > b &&
-      Math.abs(r - g) > 12 &&
-      r - b > 15
+      Math.abs(r - g) > 10 &&
+      r - b > 14
     );
   };
 
-  // Check color distance & connectivity
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-      const a = data[idx + 3];
+  let head = 0;
+  while (head < queue.length) {
+    const curr = queue[head++];
+    const cx = curr % width;
+    const cy = Math.floor(curr / width);
+    const idx = curr * 4;
+    const r = data[idx];
+    const g = data[idx + 1];
+    const b = data[idx + 2];
+    const a = data[idx + 3];
 
-      if (a < 10) {
-        mask[y * width + x] = 0;
-        continue;
-      }
+    // Portrait Body & Face Protection: Center-lower body/face region should never be removed as background
+    const isPortraitCoreRegion =
+      cx > width * 0.18 &&
+      cx < width * 0.82 &&
+      cy > height * 0.18;
 
-      // Center region portrait face protection
-      const isCenterFaceRegion =
-        x > width * 0.22 &&
-        x < width * 0.78 &&
-        y > height * 0.15 &&
-        y < height * 0.75;
+    if (isPortraitCoreRegion && isSkinTone(r, g, b)) {
+      // Definite face/neck skin pixel - DO NOT treat as background
+      continue;
+    }
 
-      if (isCenterFaceRegion && isSkinTone(r, g, b)) {
-        mask[y * width + x] = 255;
-        continue;
-      }
-
-      // Calculate minimum distance to sampled background colors
+    if (a < 10) {
+      mask[curr] = 0;
+    } else {
       let minDistance = 999;
       for (const [sr, sg, sb] of sampleColors) {
-        const dist = Math.sqrt(
-          Math.pow(r - sr, 2) * 0.3 +
-          Math.pow(g - sg, 2) * 0.59 +
-          Math.pow(b - sb, 2) * 0.11
-        );
-        if (dist < minDistance) {
-          minDistance = dist;
-        }
+        const dist = colorDist(r, g, b, sr, sg, sb);
+        if (dist < minDistance) minDistance = dist;
       }
 
-      // Higher sensitivity near top edge and outer borders where background is dominant
-      const isOuterBorder = y < height * 0.22 || x < width * 0.15 || x > width * 0.85;
-      const effectiveTolerance = isOuterBorder ? tolerance * 1.15 : tolerance * 0.95;
+      // Stricter threshold inside the central portrait chest/shirt zone
+      const effectiveTolerance = isPortraitCoreRegion ? Math.min(tolerance, 28) : tolerance;
 
       if (minDistance < effectiveTolerance) {
-        // Background pixel
-        mask[y * width + x] = 0;
-      } else if (minDistance < effectiveTolerance + 15) {
-        // Soft edge transition for hair and shoulders
-        const alpha = Math.round(((minDistance - effectiveTolerance) / 15) * 255);
-        mask[y * width + x] = alpha;
-      } else {
-        // Subject pixel
-        mask[y * width + x] = 255;
+        mask[curr] = 0; // Marked as background
+
+        // Expand to 4 neighbors
+        const neighbors = [
+          [cx + 1, cy],
+          [cx - 1, cy],
+          [cx, cy + 1],
+          [cx, cy - 1],
+        ];
+
+        for (const [nx, ny] of neighbors) {
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            const nIdx = ny * width + nx;
+            if (!visited[nIdx]) {
+              visited[nIdx] = 1;
+              queue.push(nIdx);
+            }
+          }
+        }
+      } else if (minDistance < effectiveTolerance + 10) {
+        // Soft border transition
+        mask[curr] = Math.round(((minDistance - effectiveTolerance) / 10) * 255);
       }
     }
   }
@@ -243,7 +271,9 @@ export async function removeBackgroundAuto(
   coloredDataUrl: string;
   source: 'remove.bg' | 'studio_ai';
 }> {
-  const { targetBgColor = '#87CEEB', apiKey, tolerance = 38 } = options;
+  const clientKey = options.apiKey || (typeof window !== 'undefined' ? localStorage.getItem('remove_bg_api_key') || undefined : undefined);
+  const { targetBgColor = '#87CEEB', tolerance = 38 } = options;
+  const apiKey = clientKey;
 
   // 1. Try server-side Remove.bg API
   try {
