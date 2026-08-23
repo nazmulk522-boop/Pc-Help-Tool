@@ -148,7 +148,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={() => onOpenLoginModal('admin_login')}
               className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold transition"
-              title="এডমিন লগইন (nazmulk522@gmail.com)"
+              title="এডমিন লগইন"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
               <span>এডমিন</span>

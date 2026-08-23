@@ -1,16 +1,14 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ShopProfile, UserRole } from '../types';
 
-export const ADMIN_EMAIL = 'nazmulk522@gmail.com';
-
 export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   shopId: 'default_shop',
-  ownerEmail: 'guest@computer-shop.local',
+  ownerEmail: '',
   ownerName: 'মালিক / অপারেটর',
   shopName: 'ডিজিটাল কম্পিউটার শপ ও স্টুডিও',
   tagline: 'কম্পিউটার সেবা, অনলাইন আবেদন, NID সংশোধন ও ডিজিটাল ফটো স্টুডিও',
-  phone: '০১৭১২-৩৪৫৬৭৮',
-  address: 'থানা রোড, সদর বাজার',
+  phone: '+8809649487206',
+  address: 'সাবানা রোড, বনবাড়িয়া',
   role: 'guest',
 };
 
@@ -19,7 +17,9 @@ interface ShopAuthContextType {
   isLoggedIn: boolean;
   isSuperAdmin: boolean;
   registeredShops: ShopProfile[];
-  loginAsAdmin: (email: string, pinOrPass?: string) => { success: boolean; message: string };
+  loginAsAdmin: (email: string, password?: string) => { success: boolean; message: string };
+  changeAdminPassword: (oldPass: string, newPass: string) => { success: boolean; message: string };
+  resetAdminPassword: () => { success: boolean; message: string };
   loginAsShopOwner: (data: {
     email: string;
     ownerName: string;
@@ -35,8 +35,10 @@ interface ShopAuthContextType {
 
 const ShopAuthContext = createContext<ShopAuthContextType | undefined>(undefined);
 
-const STORAGE_KEY_CURRENT_USER = 'shop_auth_current_user_v2';
-const STORAGE_KEY_ALL_SHOPS = 'shop_auth_all_shops_v2';
+const STORAGE_KEY_CURRENT_USER = 'shop_auth_current_user_v3';
+const STORAGE_KEY_ALL_SHOPS = 'shop_auth_all_shops_v3';
+const STORAGE_KEY_ADMIN_PASS = 'shop_admin_password_v3';
+const DEFAULT_ADMIN_PASS = 'admin123';
 
 export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentProfile, setCurrentProfile] = useState<ShopProfile>(() => {
@@ -64,19 +66,15 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.error('Error loading registered shops:', e);
       }
     }
-    return [
-      {
-        shopId: 'admin_primary_shop',
-        ownerEmail: ADMIN_EMAIL,
-        ownerName: 'নাজমুল হাসান (সুপার এডমিন)',
-        shopName: 'ডিজিটাল কম্পিউটার শপ ও স্টুডিও',
-        tagline: 'অনলাইন আবেদন, ভোটার সেবা ও হাই-কোয়ালিটি ফটো প্রিন্ট',
-        phone: '০১৭০০-০০০০০০',
-        address: 'ঢাকা, বাংলাদেশ',
-        role: 'super_admin',
-        createdAt: new Date().toISOString(),
-      },
-    ];
+    return [];
+  });
+
+  const [adminPassword, setAdminPassword] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const savedPass = localStorage.getItem(STORAGE_KEY_ADMIN_PASS);
+      if (savedPass) return savedPass;
+    }
+    return DEFAULT_ADMIN_PASS;
   });
 
   // Save current profile to localStorage whenever it changes
@@ -101,18 +99,34 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   }, [registeredShops]);
 
-  const isLoggedIn = currentProfile.role !== 'guest';
-  const isSuperAdmin =
-    currentProfile.ownerEmail.toLowerCase().trim() === ADMIN_EMAIL.toLowerCase().trim() ||
-    currentProfile.role === 'super_admin';
+  // Save admin password
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(STORAGE_KEY_ADMIN_PASS, adminPassword);
+      } catch (e) {
+        console.error('Error saving admin password:', e);
+      }
+    }
+  }, [adminPassword]);
 
-  // Admin Login: Only for nazmulk522@gmail.com
-  const loginAsAdmin = (email: string, pinOrPass?: string) => {
+  const isLoggedIn = currentProfile.role !== 'guest';
+  const isSuperAdmin = currentProfile.role === 'super_admin';
+
+  // Admin Login: Manual email and password entry
+  const loginAsAdmin = (email: string, password?: string) => {
     const cleanEmail = email.trim().toLowerCase();
-    if (cleanEmail !== ADMIN_EMAIL.toLowerCase()) {
+    if (!cleanEmail || !cleanEmail.includes('@')) {
       return {
         success: false,
-        message: `অনুমতি নেই! এডমিন হিসেবে শুধুমাত্র (${ADMIN_EMAIL}) লগইন করতে পারবেন। সাধারণ দোকানদার হিসেবে "দোকান লগইন" ট্যাব ব্যবহার করুন।`,
+        message: 'সঠিক এডমিন ইমেইল বা জিমেইল ঠিকানা লিখুন।',
+      };
+    }
+
+    if (!password || password.trim() !== adminPassword.trim()) {
+      return {
+        success: false,
+        message: 'ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিন।',
       };
     }
 
@@ -121,13 +135,13 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
 
     const adminProfile: ShopProfile = existingAdminShop || {
-      shopId: 'admin_primary_shop',
-      ownerEmail: ADMIN_EMAIL,
-      ownerName: 'সুপার এডমিন (নাজমুল)',
-      shopName: currentProfile.shopName || 'ডিজিটাল কম্পিউটার শপ ও স্টুডিও (এডমিন হাব)',
-      tagline: 'মাস্টার এডমিন ও কম্পিউটার সেবা ম্যানেজমেন্ট',
-      phone: currentProfile.phone || '০১৭১২-৩৪৫৬৭৮',
-      address: currentProfile.address || 'ঢাকা, বাংলাদেশ',
+      shopId: 'admin_' + Date.now(),
+      ownerEmail: cleanEmail,
+      ownerName: 'সুপার এডমিন',
+      shopName: currentProfile.shopName || 'ডিজিটাল কম্পিউটার শপ ও স্টুডিও',
+      tagline: currentProfile.tagline || 'অনলাইন সেবা ও ডিজিটাল স্টুডিও',
+      phone: currentProfile.phone || '+8809649487206',
+      address: currentProfile.address || 'সাবানা রোড, বনবাড়িয়া',
       role: 'super_admin',
       updatedAt: new Date().toISOString(),
     };
@@ -143,8 +157,26 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     return {
       success: true,
-      message: `স্বাগতম এডমিন! (${ADMIN_EMAIL}) সফলভাবে লগইন হয়েছেন।`,
+      message: `স্বাগতম! (${cleanEmail}) সফলভাবে এডমিন হিসেবে লগইন হয়েছেন।`,
     };
+  };
+
+  // Change Admin Password
+  const changeAdminPassword = (oldPass: string, newPass: string) => {
+    if (oldPass.trim() !== adminPassword.trim()) {
+      return { success: false, message: 'বর্তমান পাসওয়ার্ডটি সঠিক নয়।' };
+    }
+    if (!newPass || newPass.trim().length < 4) {
+      return { success: false, message: 'নতুন পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে।' };
+    }
+    setAdminPassword(newPass.trim());
+    return { success: true, message: 'এডমিন পাসওয়ার্ড সফলভাবে পরিবর্তিত হয়েছে!' };
+  };
+
+  // Reset Admin Password back to default
+  const resetAdminPassword = () => {
+    setAdminPassword(DEFAULT_ADMIN_PASS);
+    return { success: true, message: `পাসওয়ার্ড রিসেট হয়ে ডিফল্ট (${DEFAULT_ADMIN_PASS}) সেট করা হয়েছে।` };
   };
 
   // Shop Owner Login: Any shop owner can register/login with Gmail
@@ -161,9 +193,8 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { success: false, message: 'সঠিক জিমেইল বা ইমেইল ঠিকানা দিন।' };
     }
 
-    // Check if this is actually the admin email trying to log in as shop
-    const role: UserRole =
-      cleanEmail === ADMIN_EMAIL.toLowerCase() ? 'super_admin' : 'shop_owner';
+    // Shop owner role
+    const role: UserRole = 'shop_owner';
 
     // Find existing shop or create new
     const existing = registeredShops.find((s) => s.ownerEmail.toLowerCase() === cleanEmail);
@@ -237,6 +268,8 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         isSuperAdmin,
         registeredShops,
         loginAsAdmin,
+        changeAdminPassword,
+        resetAdminPassword,
         loginAsShopOwner,
         updateShopProfile,
         logout,
