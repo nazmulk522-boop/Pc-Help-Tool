@@ -12,19 +12,19 @@ import {
   AlertCircle, 
   Loader2, 
   X, 
-  Server, 
-  Database, 
   RefreshCw, 
-  Layers,
   Sparkles,
-  ExternalLink,
-  Trash2
+  Trash2,
+  Code2,
+  HelpCircle,
+  Play
 } from 'lucide-react';
 import { XtreamAccount, M3uPlaylist } from '../../types';
 import { 
   authenticateXtreamCodes, 
   syncXtreamContent, 
   parseM3uContent, 
+  applyAndCacheM3uPlaylist,
   saveM3uPlaylist, 
   getSavedXtreamAccounts, 
   getSavedM3uPlaylists, 
@@ -46,23 +46,25 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
 }) => {
   const { isSuperAdmin, verifyAdminPassword } = useShopAuth();
 
-  const [activeTab, setActiveTab] = useState<'xtream' | 'm3u_url' | 'm3u_file' | 'accounts'>('xtream');
+  const [activeTab, setActiveTab] = useState<'xtream' | 'm3u_url' | 'm3u_text' | 'm3u_file' | 'accounts'>('xtream');
 
   // Xtream Form State
   const [serverUrl, setServerUrl] = useState<string>('');
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const [accountName, setAccountName] = useState<string>('');
   
   // M3U URL Form State
   const [m3uUrl, setM3uUrl] = useState<string>('');
   const [m3uName, setM3uName] = useState<string>('');
 
+  // M3U Raw Text State
+  const [rawM3uText, setRawM3uText] = useState<string>('');
+
   // Status & Feedback
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string; details?: string } | null>(null);
 
-  // Admin Verification Gate (if user is not superadmin logged in yet)
+  // Admin Verification Gate
   const [adminPass, setAdminPass] = useState<string>('');
   const [isUnlocked, setIsUnlocked] = useState<boolean>(isSuperAdmin);
 
@@ -130,7 +132,8 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
     setIsLoading(true);
 
     try {
-      if (!m3uUrl) {
+      const cleanUrl = m3uUrl.trim().replace(/\s+/g, '');
+      if (!cleanUrl) {
         setFeedback({ type: 'error', message: 'M3U প্লেলিস্ট URL প্রদান করুন।' });
         setIsLoading(false);
         return;
@@ -139,30 +142,43 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
       const res = await fetch('/api/iptv/fetch-m3u', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: m3uUrl }),
+        body: JSON.stringify({ url: cleanUrl }),
       });
 
       const json = await res.json();
       if (!res.ok || !json.success) {
-        setFeedback({ type: 'error', message: json.error || 'প্লেলিস্ট ডাউনলোড করা যায়নি।' });
+        setFeedback({ 
+          type: 'error', 
+          message: json.error || 'প্লেলিস্ট ডাউনলোড করা যায়নি।',
+          details: json.details || (json.isHtml ? 'এই লিঙ্কটি একটি ওয়েবসাইট/ব্লগ পেজ লোড করেছে। সরাসরি .m3u ফাইল ডাউনলোড করে "M3U ফাইল আপলোড" এ আপলোড করুন।' : undefined)
+        });
         setIsLoading(false);
         return;
       }
 
       const { categories, channels } = parseM3uContent(json.content, m3uName || 'M3U Playlist');
       
+      if (channels.length === 0) {
+        setFeedback({
+          type: 'error',
+          message: 'প্রদত্ত লিংকে কোনো লাইভ চ্যানেল পাওয়া যায়নি!',
+          details: 'লিংকটিতে কোনো #EXTINF বা স্ট্রিম ইউআরএল পাওয়া যায়নি। লিংকটি সরাসরি .m3u/.m3u8 ফাইল কিনা নিশ্চিত করুন।',
+        });
+        setIsLoading(false);
+        return;
+      }
+
       const playlistObj: M3uPlaylist = {
         id: `m3u_${Date.now()}`,
         name: m3uName || 'Custom M3U Playlist',
-        url: m3uUrl,
+        url: cleanUrl,
         channelCount: channels.length,
         lastUpdated: new Date().toISOString(),
         isDefault: true,
       };
 
       saveM3uPlaylist(playlistObj);
-      localStorage.setItem('shop_iptv_custom_channels', JSON.stringify(channels.slice(0, 500)));
-      localStorage.setItem('shop_iptv_custom_categories', JSON.stringify(categories));
+      await applyAndCacheM3uPlaylist(channels, categories);
 
       setFeedback({
         type: 'success',
@@ -176,7 +192,55 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
     }
   };
 
-  // 3. File Upload (.m3u / .m3u8 / .txt)
+  // 3. Raw M3U Text Submit
+  const handleRawM3uSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFeedback(null);
+    setIsLoading(true);
+
+    try {
+      if (!rawM3uText.trim()) {
+        setFeedback({ type: 'error', message: 'M3U কোড বা টেক্সট পেস্ট করুন।' });
+        setIsLoading(false);
+        return;
+      }
+
+      const { categories, channels } = parseM3uContent(rawM3uText, m3uName || 'Pasted Playlist');
+
+      if (channels.length === 0) {
+        setFeedback({
+          type: 'error',
+          message: 'কোনো ভ্যালিড চ্যানেল পাওয়া যায়নি।',
+          details: '#EXTINF: -1 tvg-name="Channel Name" ... http://... ফরম্যাটে কোড পেস্ট করুন।',
+        });
+        setIsLoading(false);
+        return;
+      }
+
+      const playlistObj: M3uPlaylist = {
+        id: `m3u_text_${Date.now()}`,
+        name: m3uName || 'Custom Pasted M3U',
+        channelCount: channels.length,
+        lastUpdated: new Date().toISOString(),
+        isDefault: true,
+      };
+
+      saveM3uPlaylist(playlistObj);
+      await applyAndCacheM3uPlaylist(channels, categories);
+
+      setFeedback({
+        type: 'success',
+        message: `সফলভাবে ${channels.length} টি চ্যানেল যুক্ত হয়েছে!`,
+      });
+      onPlaylistUpdated();
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: 'টেক্সট পার্স করতে সমস্যা হয়েছে।' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 4. File Upload (.m3u / .m3u8 / .txt)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -185,7 +249,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
     setFeedback(null);
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const text = event.target?.result as string;
         if (!text) {
@@ -196,6 +260,12 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
 
         const { categories, channels } = parseM3uContent(text, file.name);
 
+        if (channels.length === 0) {
+          setFeedback({ type: 'error', message: 'ফাইলে কোনো চ্যানেল পাওয়া যায়নি।' });
+          setIsLoading(false);
+          return;
+        }
+
         const playlistObj: M3uPlaylist = {
           id: `m3u_file_${Date.now()}`,
           name: file.name.replace(/\.[^/.]+$/, ''),
@@ -205,8 +275,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
         };
 
         saveM3uPlaylist(playlistObj);
-        localStorage.setItem('shop_iptv_custom_channels', JSON.stringify(channels.slice(0, 500)));
-        localStorage.setItem('shop_iptv_custom_categories', JSON.stringify(categories));
+        await applyAndCacheM3uPlaylist(channels, categories);
 
         setFeedback({
           type: 'success',
@@ -250,62 +319,72 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+            className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-750 text-slate-400 hover:text-white transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Security Gate Check */}
+        {/* Security Unlock Gate */}
         {!isUnlocked ? (
-          <form onSubmit={handleAdminUnlock} className="p-6 space-y-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center mx-auto">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <div>
-              <h4 className="font-bold text-sm text-white">সুপার এডমিন ভেরিফিকেশন</h4>
-              <p className="text-xs text-slate-300 mt-1">
-                IPTV / Xtream API এবং M3U সার্ভার কনফিগারেশন পরিবর্তন করতে এডমিন পাসওয়ার্ড প্রদান করুন।
+          <form onSubmit={handleAdminUnlock} className="p-6 space-y-4">
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <h4 className="font-bold text-sm text-white">
+                এডমিন ভেরিফিকেশন প্রয়োজন
+              </h4>
+              <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                IPTV কনফিগারেশন ও স্ট্রিম সার্ভার পরিবর্তনের জন্য এডমিন পাসওয়ার্ড প্রবেশ করুন।
               </p>
             </div>
+
             <div className="max-w-xs mx-auto space-y-2">
-              <input
-                type="password"
-                required
-                autoFocus
-                value={adminPass}
-                onChange={(e) => setAdminPass(e.target.value)}
-                placeholder="এডমিন পাসওয়ার্ড (যেমন: admin123)"
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-cyan-500 text-center"
-              />
+              <div className="relative">
+                <Key className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  value={adminPass}
+                  onChange={(e) => setAdminPass(e.target.value)}
+                  placeholder="এডমিন পাসওয়ার্ড দিন (admin123)"
+                  className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-cyan-500"
+                />
+              </div>
+
               <button
                 type="submit"
-                className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition shadow-md shadow-cyan-950"
+                className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-cyan-950"
               >
-                আনলক ও কনফিগার করুন
+                <span>আনলক করুন</span>
               </button>
             </div>
+
             {feedback && (
-              <p className="text-xs text-rose-400 font-medium">{feedback.message}</p>
+              <div className="p-3 rounded-xl text-xs flex items-center gap-2 max-w-xs mx-auto bg-rose-500/10 border border-rose-500/30 text-rose-300">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{feedback.message}</span>
+              </div>
             )}
           </form>
         ) : (
           <div className="p-4 sm:p-5 space-y-4">
             {/* Tabs */}
-            <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 gap-1 text-xs">
+            <div className="grid grid-cols-5 bg-slate-950 p-1 rounded-xl border border-slate-800 gap-1 text-[11px]">
               <button
                 type="button"
                 onClick={() => {
                   setActiveTab('xtream');
                   setFeedback(null);
                 }}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition text-center truncate cursor-pointer ${
                   activeTab === 'xtream'
                     ? 'bg-cyan-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Xtream Codes API
+                Xtream API
               </button>
               <button
                 type="button"
@@ -313,13 +392,27 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   setActiveTab('m3u_url');
                   setFeedback(null);
                 }}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition text-center truncate cursor-pointer ${
                   activeTab === 'm3u_url'
                     ? 'bg-cyan-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                M3U URL লিঙ্ক
+                M3U লিঙ্ক
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('m3u_text');
+                  setFeedback(null);
+                }}
+                className={`py-1.5 px-1 rounded-lg font-bold transition text-center truncate cursor-pointer ${
+                  activeTab === 'm3u_text'
+                    ? 'bg-cyan-600 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Raw কোড
               </button>
               <button
                 type="button"
@@ -327,13 +420,13 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   setActiveTab('m3u_file');
                   setFeedback(null);
                 }}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition text-center truncate cursor-pointer ${
                   activeTab === 'm3u_file'
                     ? 'bg-cyan-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                M3U ফাইল আপলোড
+                ফাইল আপলোড
               </button>
               <button
                 type="button"
@@ -341,14 +434,14 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   setActiveTab('accounts');
                   setFeedback(null);
                 }}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition flex items-center justify-center gap-1 ${
+                className={`py-1.5 px-1 rounded-lg font-bold transition flex items-center justify-center gap-1 truncate cursor-pointer ${
                   activeTab === 'accounts'
                     ? 'bg-cyan-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <span>অ্যাকাউন্টস</span>
-                <span className="text-[10px] px-1 bg-slate-800 rounded">
+                <span>অ্যাকাউন্ট</span>
+                <span className="text-[9px] px-1 bg-slate-800 rounded">
                   {savedAccounts.length + savedPlaylists.length}
                 </span>
               </button>
@@ -367,7 +460,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                     required
                     value={serverUrl}
                     onChange={(e) => setServerUrl(e.target.value)}
-                    placeholder="http://example-iptv.com:8080 বা https://..."
+                    placeholder="http://rgkkw.live:80 বা http://example.com:8080"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-cyan-500 font-mono"
                   />
                 </div>
@@ -412,7 +505,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                       setUsername('1Aoen7elp5');
                       setPassword('IgMJ60tmAa');
                     }}
-                    className="text-[11px] text-cyan-400 hover:text-cyan-300 underline font-medium flex items-center gap-1"
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 underline font-medium flex items-center gap-1 cursor-pointer"
                   >
                     <Sparkles className="w-3 h-3" />
                     <span>টেস্ট ক্রেডেনশিয়ালস পূরণ করুন (rgkkw.live)</span>
@@ -450,7 +543,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                     type="text"
                     value={m3uName}
                     onChange={(e) => setM3uName(e.target.value)}
-                    placeholder="যেমন: My BD IPTV / Global Sports"
+                    placeholder="যেমন: BD Live TV / Global Sports"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-cyan-500"
                   />
                 </div>
@@ -458,16 +551,49 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                 <div className="space-y-1">
                   <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
                     <Globe className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>M3U / M3U8 প্লেলিস্ট URL লিঙ্ক</span>
+                    <span>M3U / M3U8 প্লেলিস্ট লিঙ্ক (Direct .m3u URL)</span>
                   </label>
                   <input
-                    type="url"
+                    type="text"
                     required
                     value={m3uUrl}
                     onChange={(e) => setM3uUrl(e.target.value)}
-                    placeholder="https://example.com/playlist.m3u বা http://..."
+                    placeholder="https://raw.githubusercontent.com/.../playlist.m3u"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-cyan-500 font-mono"
                   />
+                </div>
+
+                {/* Helpful Note about skym3u / blog links */}
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] space-y-1 text-slate-400">
+                  <div className="flex items-center gap-1.5 text-amber-400 font-medium">
+                    <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>সরাসরি M3U লিঙ্ক ব্যবহার সংক্রান্ত তথ্য:</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    <span className="text-slate-300 font-mono">skym3u.top</span> এর মতো সাইটের লিংকে প্রবেশ করলে সরাসরি M3U ফাইল আসে না (কারণ এগুলো ওয়েবসাইট/ব্লগ পেজ)। ওই সাইটে ঢুকে <b>.m3u ফাইলটি ডাউনলোড</b> করে "ফাইল আপলোড" ট্যাবে দিন অথবা নিচের টেস্ট প্লেলিস্ট ট্রাই করুন:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setM3uUrl('https://iptv-org.github.io/iptv/countries/bd.m3u');
+                        setM3uName('Bangladesh Free IPTV');
+                      }}
+                      className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 hover:bg-cyan-900 text-[10px] cursor-pointer"
+                    >
+                      🇧🇩 বাংলাদেশ ফ্রি IPTV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setM3uUrl('https://iptv-org.github.io/iptv/categories/news.m3u');
+                        setM3uName('Global News Live');
+                      }}
+                      className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 hover:bg-cyan-900 text-[10px] cursor-pointer"
+                    >
+                      🌐 গ্লোবাল নিউজ
+                    </button>
+                  </div>
                 </div>
 
                 <button
@@ -478,7 +604,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   {isLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>প্লেলিস্ট ডাউনলোড হচ্ছে...</span>
+                      <span>প্লেলিস্ট ডাউনলোড ও লোড হচ্ছে...</span>
                     </>
                   ) : (
                     <>
@@ -490,7 +616,58 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
               </form>
             )}
 
-            {/* Tab 3: M3U File Upload */}
+            {/* Tab 3: Raw M3U Text Paste */}
+            {activeTab === 'm3u_text' && (
+              <form onSubmit={handleRawM3uSubmit} className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300">
+                    প্লেলিস্টের নাম (ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="text"
+                    value={m3uName}
+                    onChange={(e) => setM3uName(e.target.value)}
+                    placeholder="যেমন: Pasted Channels"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-cyan-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Raw M3U টেক্সট বা কোড পেস্ট করুন (#EXTM3U)</span>
+                  </label>
+                  <textarea
+                    rows={5}
+                    required
+                    value={rawM3uText}
+                    onChange={(e) => setRawM3uText(e.target.value)}
+                    placeholder="#EXTM3U&#10;#EXTINF:-1 tvg-name=&quot;Somoy TV&quot; group-title=&quot;News&quot;,Somoy TV&#10;http://stream-url.m3u8"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-600 focus:outline-hidden focus:border-cyan-500 font-mono"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-cyan-950 cursor-pointer disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>চ্যানেল প্রসেসিং হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>পেস্ট করা চ্যানেল লোড করুন</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {/* Tab 4: M3U File Upload */}
             {activeTab === 'm3u_file' && (
               <div className="space-y-3 text-center">
                 <label className="border-2 border-dashed border-slate-700 hover:border-cyan-500/70 rounded-2xl p-6 flex flex-col items-center justify-center gap-2.5 cursor-pointer bg-slate-950/60 hover:bg-slate-950 transition block">
@@ -502,7 +679,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                       .m3u বা .m3u8 প্লেলিস্ট ফাইল নির্বাচন করুন
                     </span>
                     <span className="text-[11px] text-slate-400">
-                      ফাইলটি ড্রপ করুন অথবা ক্লিক করে আপলোড করুন
+                      skym3u বা অন্য সাইট থেকে ডাউনলোড করা ফাইল ড্রপ বা ক্লিক করুন
                     </span>
                   </div>
                   <input
@@ -515,7 +692,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
               </div>
             )}
 
-            {/* Tab 4: Saved Accounts & Reset */}
+            {/* Tab 5: Saved Accounts & Reset */}
             {activeTab === 'accounts' && (
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {savedAccounts.length === 0 && savedPlaylists.length === 0 ? (
@@ -540,16 +717,17 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-400 font-mono truncate mt-0.5">
-                            {acc.serverUrl} • ইউজার: {acc.username} • মেয়াদ: {acc.expDate || 'Active'}
+                            {acc.serverUrl} • ইউজার: {acc.username} • মেয়াদ: {acc.userInfo?.expDate || 'Active'}
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
+                            type="button"
                             onClick={() => {
                               deleteXtreamAccount(acc.id);
                               onPlaylistUpdated();
                             }}
-                            className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition"
+                            className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition cursor-pointer"
                             title="মুছে ফেলুন"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -575,11 +753,12 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                           </p>
                         </div>
                         <button
+                          type="button"
                           onClick={() => {
                             deleteM3uPlaylist(pl.id);
                             onPlaylistUpdated();
                           }}
-                          className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition shrink-0"
+                          className="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800 transition shrink-0 cursor-pointer"
                           title="মুছে ফেলুন"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -601,7 +780,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                       message: 'ডিফল্ট ফ্রি চ্যানেলে সফলভাবে রিসেট করা হয়েছে।',
                     });
                   }}
-                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition"
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
                   <span>ডিফল্ট ফ্রি চ্যানেল তালিকায় রিসেট করুন</span>
@@ -623,7 +802,14 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                 ) : (
                   <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 )}
-                <div className="flex-1 font-medium">{feedback.message}</div>
+                <div className="flex-1">
+                  <div className="font-medium">{feedback.message}</div>
+                  {feedback.details && (
+                    <div className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                      {feedback.details}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

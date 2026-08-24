@@ -142,6 +142,8 @@ export function parseM3uContent(content: string, playlistName = 'Custom Playlist
   categories: IptvCategory[];
   channels: IptvChannel[];
 } {
+  if (!content) return { categories: [], channels: [] };
+
   const lines = content.split(/\r?\n/);
   const channels: IptvChannel[] = [];
   const categoriesMap = new Map<string, number>();
@@ -193,33 +195,43 @@ export function parseM3uContent(content: string, playlistName = 'Custom Playlist
         group,
         resolution,
       };
-    } else if (!line.startsWith('#') && currentInfo) {
-      // Line is stream URL
+    } else if (!line.startsWith('#')) {
+      // Line is stream URL (either preceded by #EXTINF or raw URL)
       const streamUrl = line;
-      const categoryId = currentInfo.group
-        ? currentInfo.group.toLowerCase().replace(/[^a-z0-9]/g, '_')
-        : 'general';
+      if (streamUrl.startsWith('http://') || streamUrl.startsWith('https://') || streamUrl.startsWith('rtmp://')) {
+        const info = currentInfo || {
+          id: `ch_${channels.length + 1}`,
+          name: `Channel ${channels.length + 1}`,
+          logo: '',
+          group: 'General',
+          resolution: '1080p HD',
+        };
 
-      const channelObj: IptvChannel = {
-        id: `m3u_${channels.length + 1}_${Math.random().toString(36).substring(2, 7)}`,
-        num: channels.length + 1,
-        name: currentInfo.name || `Channel ${channels.length + 1}`,
-        streamUrl: streamUrl,
-        streamIcon: currentInfo.logo,
-        categoryId: categoryId,
-        categoryName: currentInfo.group || 'General',
-        resolution: currentInfo.resolution,
-        currentProgram: `${currentInfo.name} Live Broadcast`,
-        nextProgram: 'Regular Schedule',
-      };
+        const categoryId = (info.group || 'General')
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '_');
 
-      channels.push(channelObj);
-      categoriesMap.set(
-        currentInfo.group || 'General',
-        (categoriesMap.get(currentInfo.group || 'General') || 0) + 1
-      );
+        const channelObj: IptvChannel = {
+          id: `m3u_${channels.length + 1}_${Math.random().toString(36).substring(2, 7)}`,
+          num: channels.length + 1,
+          name: info.name || `Channel ${channels.length + 1}`,
+          streamUrl: streamUrl,
+          streamIcon: info.logo,
+          categoryId: categoryId,
+          categoryName: info.group || 'General',
+          resolution: info.resolution || '1080p HD',
+          currentProgram: `${info.name} Live Broadcast`,
+          nextProgram: 'Regular Schedule',
+        };
 
-      currentInfo = null;
+        channels.push(channelObj);
+        categoriesMap.set(
+          info.group || 'General',
+          (categoriesMap.get(info.group || 'General') || 0) + 1
+        );
+
+        currentInfo = null;
+      }
     }
   }
 
@@ -236,6 +248,19 @@ export function parseM3uContent(content: string, playlistName = 'Custom Playlist
   });
 
   return { categories, channels };
+}
+
+export async function applyAndCacheM3uPlaylist(
+  channels: IptvChannel[],
+  categories: IptvCategory[]
+): Promise<void> {
+  inMemoryChannels = channels;
+  inMemoryCategories = categories;
+  await saveChannelsToIndexedDB(channels, categories);
+  try {
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(channels.slice(0, 150)));
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_CATEGORIES, JSON.stringify(categories.slice(0, 50)));
+  } catch (e) {}
 }
 
 // 5. Xtream Codes API Integration

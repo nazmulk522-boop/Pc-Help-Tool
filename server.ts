@@ -172,12 +172,13 @@ app.post('/api/iptv/xtream-data', async (req, res) => {
 // 3. Fetch remote M3U / M3U8 Playlist
 app.post('/api/iptv/fetch-m3u', async (req, res) => {
   try {
-    const { url } = req.body;
+    let { url } = req.body;
     if (!url) {
       return res.status(400).json({ success: false, error: 'Playlist URL is required' });
     }
 
-    let targetUrl = url.trim();
+    // Remove any accidental whitespace inside domain/path (e.g., "skym3u. top" -> "skym3u.top")
+    let targetUrl = String(url).trim().replace(/\s+/g, '');
     if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
       targetUrl = `http://${targetUrl}`;
     }
@@ -197,11 +198,50 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
     if (!response.ok) {
       return res.status(response.status).json({
         success: false,
-        error: `Failed to download playlist: HTTP ${response.status}`,
+        error: `প্লেলিস্ট সার্ভার থেকে HTTP ${response.status} রেসপন্স এসেছে। লিঙ্কটি সঠিক কিনা যাচাই করুন।`,
       });
     }
 
     const text = await response.text();
+    const contentType = response.headers.get('content-type') || '';
+
+    // Check if the returned content is an HTML webpage rather than an actual M3U/M3U8 file
+    const isHtml = contentType.includes('text/html') || 
+                   text.trim().startsWith('<!DOCTYPE html') || 
+                   text.trim().startsWith('<html') ||
+                   (text.includes('</head>') && !text.includes('#EXTINF') && !text.includes('#EXTM3U'));
+
+    if (isHtml) {
+      // Check if there are any embedded .m3u or .m3u8 URLs in the HTML
+      const embeddedM3u = text.match(/https?:\/\/[^\s"'<>]+\.m3u[8]?[^\s"'<>]*/i);
+      if (embeddedM3u) {
+        // Automatically try downloading the embedded M3U
+        try {
+          const directRes = await fetch(embeddedM3u[0], {
+            headers: { 'User-Agent': IPTV_USER_AGENT, Accept: '*/*' },
+          });
+          if (directRes.ok) {
+            const directText = await directRes.text();
+            if (directText.includes('#EXTINF') || directText.includes('#EXTM3U') || directText.includes('http')) {
+              return res.json({
+                success: true,
+                content: directText,
+                url: embeddedM3u[0],
+                size: directText.length,
+              });
+            }
+          }
+        } catch (embeddedErr) {}
+      }
+
+      return res.status(400).json({
+        success: false,
+        isHtml: true,
+        error: 'প্রদত্ত লিঙ্কটি সরাসরি M3U প্লেলিস্ট বা .m3u8 ফাইল নয়, এটি একটি ওয়েবসাইট/ব্লগ পেজ (HTML)।',
+        details: 'এই পেজে গিয়ে "Download M3U" বাটনে ক্লিক করে ফাইলটি ডাউনলোড করুন এবং "M3U ফাইল আপলোড" ট্যাবে আপলোড করুন, অথবা ডাইরেক্ট .m3u/.m3u8 স্ট্রিম লিঙ্কটি ব্যবহার করুন।',
+      });
+    }
+
     return res.json({
       success: true,
       content: text,
@@ -212,7 +252,7 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
     console.error('Fetch M3U Error:', error);
     return res.status(500).json({
       success: false,
-      error: error?.name === 'AbortError' ? 'প্লেলিস্ট ডাউনলোড হতে বেশি সময় নিয়েছে।' : error?.message || 'Failed to download M3U playlist',
+      error: error?.name === 'AbortError' ? 'প্লেলিস্ট ডাউনলোড হতে বেশি সময় নিয়েছে (Timeout)।' : error?.message || 'Failed to download M3U playlist',
     });
   }
 });
