@@ -12,6 +12,7 @@ import { PhotoPrintSheet } from './components/PhotoPrintSheet';
 import { JobApplicationResizer } from './components/JobApplicationResizer';
 import { QuickReceiptAndDocs } from './components/QuickReceiptAndDocs';
 import { LoginProfileModal } from './components/LoginProfileModal';
+import { AdminVoterDbModal } from './components/AdminVoterDbModal';
 import { Zap, X } from 'lucide-react';
 
 function MainApp() {
@@ -24,11 +25,23 @@ function MainApp() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [loginModalTab, setLoginModalTab] = useState<'shop_login' | 'admin_login' | 'profile'>('shop_login');
 
-  const { currentProfile } = useShopAuth();
+  // Voter Database Upload Admin Modal State
+  const [voterDbModalOpen, setVoterDbModalOpen] = useState(false);
+
+  const { currentProfile, isSuperAdmin } = useShopAuth();
 
   const handleOpenLoginModal = (tab: 'shop_login' | 'admin_login' | 'profile' = 'shop_login') => {
     setLoginModalTab(tab);
     setLoginModalOpen(true);
+  };
+
+  const handleOpenVoterDbModal = () => {
+    if (!isSuperAdmin) {
+      // If not logged in as admin, prompt admin login first
+      handleOpenLoginModal('admin_login');
+      return;
+    }
+    setVoterDbModalOpen(true);
   };
 
   // Callback when a tool sends an edited image directly to the Print Sheet tool
@@ -58,6 +71,7 @@ function MainApp() {
           activeTool={activeTool} 
           setActiveTool={setActiveTool} 
           onOpenLoginModal={handleOpenLoginModal}
+          onOpenVoterDbModal={handleOpenVoterDbModal}
         />
       </div>
 
@@ -88,6 +102,10 @@ function MainApp() {
                 setMobileSidebarOpen(false);
                 handleOpenLoginModal(tab);
               }}
+              onOpenVoterDbModal={() => {
+                setMobileSidebarOpen(false);
+                handleOpenVoterDbModal();
+              }}
             />
           </div>
         </div>
@@ -102,6 +120,7 @@ function MainApp() {
           onResetTask={handleResetTask}
           onToggleMobileSidebar={() => setMobileSidebarOpen(true)}
           onOpenLoginModal={handleOpenLoginModal}
+          onOpenVoterDbModal={handleOpenVoterDbModal}
         />
 
         {/* Dynamic Tool Content */}
@@ -110,9 +129,12 @@ function MainApp() {
             <HomePage 
               onSelectTool={(tool) => setActiveTool(tool)} 
               onOpenLoginModal={handleOpenLoginModal}
+              onOpenVoterDbModal={handleOpenVoterDbModal}
             />
           )}
-          {activeTool === 'voter_search' && <VoterInfoSearch />}
+          {activeTool === 'voter_search' && (
+            <VoterInfoSearch onOpenLoginModal={handleOpenLoginModal} />
+          )}
           {activeTool === 'nid' && <NidCropJoin />}
           {activeTool === 'bg_remover' && (
             <BackgroundRemover onSendToPrintSheet={handleSendToPrintSheet} />
@@ -152,6 +174,17 @@ function MainApp() {
         isOpen={loginModalOpen}
         onClose={() => setLoginModalOpen(false)}
         initialTab={loginModalTab}
+        onOpenVoterDbModal={handleOpenVoterDbModal}
+      />
+
+      {/* Global Super Admin Voter Database Upload Modal */}
+      <AdminVoterDbModal
+        isOpen={voterDbModalOpen}
+        onClose={() => setVoterDbModalOpen(false)}
+        onDatabaseUpdated={() => {
+          // If needed, refresh or force re-render
+          setTaskKey((prev) => prev + 1);
+        }}
       />
     </div>
   );

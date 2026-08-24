@@ -19,25 +19,35 @@ import {
   Trash2,
   Eye,
   Sliders,
-  RotateCcw
+  RotateCcw,
+  Upload,
+  Download,
+  FileSpreadsheet,
+  ShieldAlert,
+  Loader2
 } from 'lucide-react';
+import { exportAllVotersToExcel } from '../utils/pdfVoterParser';
+import { getDatabaseStats, DbStats } from '../utils/voterDb';
 
 interface LoginProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: 'shop_login' | 'admin_login' | 'profile';
+  onOpenVoterDbModal?: () => void;
 }
 
 export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
   isOpen,
   onClose,
   initialTab = 'shop_login',
+  onOpenVoterDbModal,
 }) => {
   const {
     currentProfile,
     isLoggedIn,
     isSuperAdmin,
     registeredShops,
+    verifyAdminPassword,
     loginAsAdmin,
     changeAdminPassword,
     resetAdminPassword,
@@ -50,6 +60,13 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
   const [activeTab, setActiveTab] = useState<'shop_login' | 'admin_login' | 'profile'>(
     isLoggedIn ? 'profile' : initialTab
   );
+
+  // Database stats & Download states
+  const [dbStats, setDbStats] = useState<DbStats | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [showAdminApprovalDialog, setShowAdminApprovalDialog] = useState(false);
+  const [approvalPassword, setApprovalPassword] = useState('');
+  const [approvalError, setApprovalError] = useState('');
 
   // Shop Owner Form State
   const [shopEmail, setShopEmail] = useState('');
@@ -94,6 +111,66 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
       setActiveTab(initialTab);
     }
   }, [isLoggedIn, currentProfile, initialTab, isOpen]);
+
+  // Load Database Stats
+  useEffect(() => {
+    if (isOpen) {
+      getDatabaseStats()
+        .then((stats) => setDbStats(stats))
+        .catch((err) => console.error('Failed to load db stats in modal:', err));
+    }
+  }, [isOpen]);
+
+  // Execute Direct Excel Export
+  const executeDatabaseDownload = async () => {
+    setIsDownloading(true);
+    try {
+      const success = await exportAllVotersToExcel();
+      if (success) {
+        setStatusMessage({
+          type: 'success',
+          text: 'ভোটার ডাটাবেজ Excel (.xlsx) সফলভাবে ডাউনলোড হয়েছে!',
+        });
+      } else {
+        setStatusMessage({
+          type: 'error',
+          text: 'ডাটাবেজে কোনো ভোটার তথ্য পাওয়া যায়নি। আগে ডাটা আপলোড করুন।',
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      setStatusMessage({
+        type: 'error',
+        text: 'ডাউনলোড করতে সমস্যা হয়েছে।',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // Check if admin or request approval
+  const handleInitiateDatabaseDownload = () => {
+    if (isSuperAdmin) {
+      executeDatabaseDownload();
+    } else {
+      setShowAdminApprovalDialog(true);
+      setApprovalPassword('');
+      setApprovalError('');
+    }
+  };
+
+  // Verify Admin Approval
+  const handleApproveAndDownload = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (verifyAdminPassword(approvalPassword)) {
+      setShowAdminApprovalDialog(false);
+      setApprovalPassword('');
+      setApprovalError('');
+      executeDatabaseDownload();
+    } else {
+      setApprovalError('ভুল এডমিন পাসওয়ার্ড! অনুমোদন ছাড়া ডাটাবেজ ডাউনলোড হবে না।');
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -540,6 +617,47 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     </span>
                   </div>
 
+                  {/* Voter Database & Seat Download Action with Admin Approval Workflow */}
+                  <div className="p-4 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border-2 border-emerald-500/50 rounded-2xl text-white space-y-3 shadow-xl">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 shrink-0">
+                        <FileSpreadsheet className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white text-xs sm:text-sm flex items-center gap-1.5">
+                          <span>ভোটার ডাটাবেইজ Excel (.xlsx) ডাউনলোড</span>
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-300 text-[10px] font-mono">
+                            Excel Export
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-emerald-200/80 leading-relaxed">
+                          {dbStats?.totalVoters
+                            ? `ডাটাবেজে সংরক্ষিত ${dbStats.totalVoters.toLocaleString('bn-BD')} জন ভোটারের সম্পূর্ণ তথ্য এক ক্লিকে ডাউনলোড করুন`
+                            : 'ডাটাবেজের সকল ভোটার তথ্য Excel (.xlsx) ফাইলে ডাউনলোড করুন'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isDownloading}
+                      onClick={handleInitiateDatabaseDownload}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 active:scale-98 cursor-pointer"
+                    >
+                      {isDownloading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>ডাটাবেজ প্রস্তুত ও ডাউনলোড হচ্ছে...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          <span>সম্পূর্ণ ডাটাবেজ Excel (.xlsx) ডাউনলোড করুন</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
                   {/* Password Management Accordion / Box */}
                   <div className="border border-slate-200 rounded-xl p-3.5 bg-slate-50 space-y-3">
                     <div className="flex items-center justify-between">
@@ -753,6 +871,42 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                 </div>
               </div>
 
+              {/* Database Download Card for All Users / Shop Owners */}
+              <div className="p-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                    <span className="font-bold text-xs">ভোটার ডাটাবেজ Excel (.xlsx) ব্যাকআপ</span>
+                  </div>
+                  <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                    {dbStats?.totalVoters ? `${dbStats.totalVoters.toLocaleString('bn-BD')} ভোটার` : '০ ভোটার'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  {isSuperAdmin
+                    ? 'সুপার এডমিন হিসেবে সম্পূর্ণ ভোটার তালিকা এক ক্লিকে ডাউনলোড করুন।'
+                    : 'দোকানদার হিসেবে ডাটাবেজ ডাউনলোড করতে সুপার এডমিনের অনুমোদন প্রয়োজন হবে।'}
+                </p>
+                <button
+                  type="button"
+                  disabled={isDownloading}
+                  onClick={handleInitiateDatabaseDownload}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1.5"
+                >
+                  {isDownloading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>ডাউনলোড হচ্ছে...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>ডাটাবেজ এক্সেল (.xlsx) ডাউনলোড</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
               <div className="pt-2 flex items-center gap-3">
                 <button
                   type="submit"
@@ -776,6 +930,67 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
             </form>
           )}
         </div>
+
+        {/* Admin Approval Dialog Overlay */}
+        {showAdminApprovalDialog && (
+          <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-amber-500/50 rounded-2xl p-5 max-w-sm w-full text-white space-y-3.5 shadow-2xl animate-in zoom-in-95 duration-150">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mx-auto">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div className="text-center space-y-1">
+                <h4 className="font-bold text-sm text-white">🔒 এডমিন অনুমোদন আবশ্যক</h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  দোকানদার বা সাধারণ ব্যবহারকারী ডাউনলোড করতে চাইলে সুপার এডমিন এর পাসওয়ার্ড দিয়ে অনুমোদন নিশ্চিত করতে হবে।
+                </p>
+              </div>
+
+              <form onSubmit={handleApproveAndDownload} className="space-y-3 pt-1">
+                <div>
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    value={approvalPassword}
+                    onChange={(e) => {
+                      setApprovalPassword(e.target.value);
+                      setApprovalError('');
+                    }}
+                    placeholder="এডমিন পাসওয়ার্ড দিন (যেমন: admin123)"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
+                  {approvalError && (
+                    <p className="text-[11px] text-rose-400 mt-1.5 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      {approvalError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdminApprovalDialog(false);
+                      setApprovalPassword('');
+                      setApprovalError('');
+                    }}
+                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+                  >
+                    বাতিল
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-md shadow-amber-950"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>অনুমোদন ও ডাউনলোড</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Modal Footer */}
         <div className="p-3 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">

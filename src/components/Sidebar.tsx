@@ -11,7 +11,8 @@ import {
   Search,
   ShieldCheck,
   Store,
-  Sparkles
+  Sparkles,
+  Upload
 } from 'lucide-react';
 import { ActiveTool } from '../types';
 import { useShopAuth } from '../context/ShopAuthContext';
@@ -20,12 +21,14 @@ interface SidebarProps {
   activeTool: ActiveTool;
   setActiveTool: (tool: ActiveTool) => void;
   onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenVoterDbModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
   activeTool, 
   setActiveTool,
-  onOpenLoginModal 
+  onOpenLoginModal,
+  onOpenVoterDbModal 
 }) => {
   const { currentProfile, isLoggedIn, isSuperAdmin } = useShopAuth();
 
@@ -182,6 +185,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               );
             })}
+
+            {/* Super Admin Direct Database Upload Link */}
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => onOpenVoterDbModal && onOpenVoterDbModal()}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors text-xs text-emerald-300 hover:bg-emerald-950/60 bg-emerald-950/30 border-l-2 border-emerald-500 font-medium"
+              >
+                <div className="flex items-center gap-2.5 truncate">
+                  <Upload className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span className="truncate">ডাটাবেইজ ও আসন আপলোড</span>
+                </div>
+                <span className="text-[9px] px-1.5 py-0.2 rounded font-bold shrink-0 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  ADMIN
+                </span>
+              </button>
+            )}
           </div>
         </div>
 

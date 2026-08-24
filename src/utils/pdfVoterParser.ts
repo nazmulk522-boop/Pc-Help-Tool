@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { VoterRecord } from '../types';
 import { BANGLADESH_DISTRICTS } from '../data/bangladeshSeats';
-import { deduceDistrictAndDivision, bulkInsertVoters, normalizeSearchString } from './voterDb';
+import { deduceDistrictAndDivision, bulkInsertVoters, normalizeSearchString, getAllVotersBySeat } from './voterDb';
 
 // Set worker source for pdfjs-dist in browser Vite environment
 if (typeof window !== 'undefined') {
@@ -792,10 +792,15 @@ export function exportSeatToExcel(seatNo: string, records: VoterRecord[]): void 
 /**
  * Export Entire Voter Database to Excel (.xlsx) file
  */
-export function exportAllVotersToExcel(records: VoterRecord[]): void {
-  if (records.length === 0) return;
+export async function exportAllVotersToExcel(records?: VoterRecord[]): Promise<boolean> {
+  let list = records;
+  if (!list || list.length === 0) {
+    list = await getAllVotersBySeat('all');
+  }
 
-  const dataRows = records.map((r, idx) => ({
+  if (!list || list.length === 0) return false;
+
+  const dataRows = list.map((r, idx) => ({
     'ক্রমিক নং': r.serialNo || `${idx + 1}`,
     'ভোটারের নাম': r.nameBn,
     'নাম (ইংরেজি)': r.nameEn || '',
@@ -841,8 +846,9 @@ export function exportAllVotersToExcel(records: VoterRecord[]): void {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'সকল ভোটার তথ্য');
 
-  const fileName = `All_Voter_Database_${records.length}_Voters_${new Date().toISOString().split('T')[0]}.xlsx`;
+  const fileName = `All_Voter_Database_${list.length}_Voters_${new Date().toISOString().split('T')[0]}.xlsx`;
   XLSX.writeFile(workbook, fileName);
+  return true;
 }
 
 // Helpers for CSV / JSON parsers

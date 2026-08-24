@@ -22,17 +22,20 @@ import {
   ArrowRight,
   Cpu,
   Layers,
-  FileText
+  FileText,
+  Upload
 } from 'lucide-react';
 
 interface HomePageProps {
   onSelectTool: (tool: ActiveTool) => void;
   onOpenLoginModal: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenVoterDbModal?: () => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({
   onSelectTool,
   onOpenLoginModal,
+  onOpenVoterDbModal,
 }) => {
   const { currentProfile, isLoggedIn, isSuperAdmin } = useShopAuth();
   const [searchQuery, setSearchQuery] = useState('');
@@ -196,8 +199,20 @@ export const HomePage: React.FC<HomePageProps> = ({
             </div>
           </div>
 
-          {/* Right Side: Login / Shop Name Edit Button */}
-          <div className="shrink-0">
+          {/* Right Side: Login / Shop Name Edit Button & Admin Upload */}
+          <div className="shrink-0 flex flex-col sm:flex-row gap-2">
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => onOpenVoterDbModal && onOpenVoterDbModal()}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95 border border-emerald-400/40"
+                title="ভোটার ডাটাবেইজ ও আসন আপলোড করুন"
+              >
+                <Upload className="w-4 h-4 text-white" />
+                <span>👑 ডাটাবেইজ আপলোড</span>
+              </button>
+            )}
+
             {isLoggedIn ? (
               <button
                 onClick={() => onOpenLoginModal('profile')}

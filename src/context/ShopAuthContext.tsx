@@ -3,20 +3,23 @@ import { ShopProfile, UserRole } from '../types';
 
 export const DEFAULT_SHOP_PROFILE: ShopProfile = {
   shopId: 'default_shop',
-  ownerEmail: '',
-  ownerName: 'মালিক / অপারেটর',
+  ownerEmail: 'nazmulk522@gmail.com',
+  ownerName: 'সুপার এডমিন',
   shopName: 'ডিজিটাল কম্পিউটার শপ ও স্টুডিও',
   tagline: 'কম্পিউটার সেবা, অনলাইন আবেদন, NID সংশোধন ও ডিজিটাল ফটো স্টুডিও',
   phone: '+8809649487206',
   address: 'সাবানা রোড, বনবাড়িয়া',
-  role: 'guest',
+  role: 'super_admin',
 };
 
 interface ShopAuthContextType {
   currentProfile: ShopProfile;
   isLoggedIn: boolean;
+  isAuthenticated: boolean;
   isSuperAdmin: boolean;
   registeredShops: ShopProfile[];
+  adminPassword?: string;
+  verifyAdminPassword: (pass: string) => boolean;
   loginAsAdmin: (email: string, password?: string) => { success: boolean; message: string };
   changeAdminPassword: (oldPass: string, newPass: string) => { success: boolean; message: string };
   resetAdminPassword: () => { success: boolean; message: string };
@@ -111,7 +114,16 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [adminPassword]);
 
   const isLoggedIn = currentProfile.role !== 'guest';
-  const isSuperAdmin = currentProfile.role === 'super_admin';
+  const isSuperAdmin =
+    currentProfile.role === 'super_admin' ||
+    currentProfile.ownerEmail?.toLowerCase() === 'nazmulk522@gmail.com' ||
+    (typeof window !== 'undefined' && localStorage.getItem('shop_admin_verified') === 'true');
+  const isAuthenticated = isLoggedIn;
+
+  const verifyAdminPassword = (enteredPass: string): boolean => {
+    if (!enteredPass) return false;
+    return enteredPass.trim() === adminPassword.trim();
+  };
 
   // Admin Login: Manual email and password entry
   const loginAsAdmin = (email: string, password?: string) => {
@@ -265,8 +277,11 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       value={{
         currentProfile,
         isLoggedIn,
+        isAuthenticated,
         isSuperAdmin,
         registeredShops,
+        adminPassword,
+        verifyAdminPassword,
         loginAsAdmin,
         changeAdminPassword,
         resetAdminPassword,

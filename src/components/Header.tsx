@@ -10,7 +10,8 @@ import {
   Menu, 
   ChevronDown,
   Sparkles,
-  Key
+  Key,
+  Upload
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -19,6 +20,7 @@ interface HeaderProps {
   onResetTask?: () => void;
   onToggleMobileSidebar?: () => void;
   onOpenLoginModal: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenVoterDbModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,6 +29,7 @@ export const Header: React.FC<HeaderProps> = ({
   onResetTask,
   onToggleMobileSidebar,
   onOpenLoginModal,
+  onOpenVoterDbModal,
 }) => {
   const { currentProfile, isLoggedIn, isSuperAdmin } = useShopAuth();
 
@@ -113,6 +116,20 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right side: Shop Login & Actions */}
       <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        {/* Super Admin Direct Upload Button */}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => onOpenVoterDbModal && onOpenVoterDbModal()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-xs cursor-pointer active:scale-95"
+            title="ভোটার ডাটাবেইজ ও আসন আপলোড করুন"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">ডাটাবেইজ আপলোড</span>
+            <span className="sm:hidden">আপলোড</span>
+          </button>
+        )}
+
         {/* User / Shop Login Badge */}
         {isLoggedIn ? (
           <button

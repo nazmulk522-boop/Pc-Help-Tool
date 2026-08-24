@@ -21,7 +21,9 @@ import {
   Lock,
   ArrowRight,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ShieldAlert,
+  Loader2
 } from 'lucide-react';
 import { VoterRecord } from '../types';
 import { 
@@ -38,9 +40,12 @@ import { VoterSlipModal } from './VoterSlipModal';
 import { AdminVoterDbModal } from './AdminVoterDbModal';
 import { useShopAuth } from '../context/ShopAuthContext';
 
-export const VoterInfoSearch: React.FC = () => {
-  const { currentProfile, isAuthenticated } = useShopAuth();
-  const isSuperAdmin = isAuthenticated && currentProfile.role === 'super_admin';
+interface VoterInfoSearchProps {
+  onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+}
+
+export const VoterInfoSearch: React.FC<VoterInfoSearchProps> = ({ onOpenLoginModal }) => {
+  const { currentProfile, isLoggedIn, isSuperAdmin, verifyAdminPassword } = useShopAuth();
 
   // Active districts and seats loaded dynamically from Database
   const [activeDistricts, setActiveDistricts] = useState<ActiveDistrictInfo[]>([]);
@@ -71,6 +76,12 @@ export const VoterInfoSearch: React.FC = () => {
   // Modals state
   const [slipVoter, setSlipVoter] = useState<VoterRecord | null>(null);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
+
+  // Admin Approval for Download State
+  const [showApprovalModal, setShowApprovalModal] = useState<boolean>(false);
+  const [approvalPassword, setApprovalPassword] = useState<string>('');
+  const [approvalError, setApprovalError] = useState<string>('');
+  const [pendingDownloadType, setPendingDownloadType] = useState<'results' | 'all'>('all');
 
   // Load added districts & seats directly from IndexedDB
   const fetchDistricts = useCallback(async (preserveSelection = true) => {
@@ -139,12 +150,13 @@ export const VoterInfoSearch: React.FC = () => {
     }
   };
 
-  // Export to Excel (.xlsx) handler
+  // Export to Excel (.xlsx) handler with Admin Approval Workflow
   const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
-  const handleExportExcelData = async () => {
+
+  const runExcelExport = async (type: 'results' | 'all') => {
     try {
       setIsExportingExcel(true);
-      if (hasSearched && searchResults.length > 0) {
+      if (type === 'results' && hasSearched && searchResults.length > 0) {
         exportSeatToExcel(selectedSeat || selectedDistrict || 'Search_Results', searchResults);
         return;
       }
@@ -169,6 +181,30 @@ export const VoterInfoSearch: React.FC = () => {
       alert('এক্সেল ফাইল তৈরিতে সমস্যা হয়েছে।');
     } finally {
       setIsExportingExcel(false);
+    }
+  };
+
+  const handleRequestDownload = (type: 'results' | 'all' = 'all') => {
+    if (isSuperAdmin) {
+      runExcelExport(type);
+    } else {
+      setPendingDownloadType(type);
+      setApprovalPassword('');
+      setApprovalError('');
+      setShowApprovalModal(true);
+    }
+  };
+
+  const handleApprovalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (verifyAdminPassword(approvalPassword)) {
+      setShowApprovalModal(false);
+      const downloadType = pendingDownloadType;
+      setApprovalPassword('');
+      setApprovalError('');
+      runExcelExport(downloadType);
+    } else {
+      setApprovalError('ভুল এডমিন পাসওয়ার্ড! এডমিনের অনুমোদন ছাড়া ডাটাবেজ ডাউনলোড হবে না।');
     }
   };
 
@@ -256,32 +292,43 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
               <span>NID Data Finder</span>
             </div>
 
-            {isSuperAdmin && (
-              <div className="flex items-center gap-2">
-                {totalDbVoters > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleExportExcelData}
-                    disabled={isExportingExcel}
-                    className="px-2.5 py-1 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 transition flex items-center gap-1 text-xs font-medium"
-                    title="ডাটাবেজ এক্সেল (.xlsx) ফাইলে ডাউনলোড করুন"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>{isExportingExcel ? 'তৈরি হচ্ছে...' : 'Excel ডাউনলোড'}</span>
-                  </button>
-                )}
+            <div className="flex items-center gap-2">
+              {/* Excel Download button for any user with Admin approval protection */}
+              {totalDbVoters > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleRequestDownload('all')}
+                  disabled={isExportingExcel}
+                  className="px-2.5 py-1 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 transition flex items-center gap-1 text-xs font-medium cursor-pointer"
+                  title={isSuperAdmin ? "ডাটাবেজ এক্সেল (.xlsx) ফাইলে ডাউনলোড করুন" : "ডাটাবেজ ডাউনলোড (এডমিন অনুমোদন আবশ্যক)"}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isExportingExcel ? 'তৈরি হচ্ছে...' : 'Excel ডাউনলোড'}</span>
+                </button>
+              )}
 
-                {/* Admin Upload Trigger */}
+              {isSuperAdmin ? (
+                /* Admin Upload Trigger */
                 <button
                   type="button"
                   onClick={() => setIsAdminModalOpen(true)}
-                  className="px-3 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-400 border border-slate-700/80 transition flex items-center gap-1.5 text-xs font-medium"
+                  className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/40 transition flex items-center gap-1.5 text-xs font-bold shadow-xs cursor-pointer active:scale-95"
                 >
-                  <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                  <Upload className="w-3.5 h-3.5 text-white" />
                   <span>ডাটাবেইজ আপলোড</span>
                 </button>
-              </div>
-            )}
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onOpenLoginModal && onOpenLoginModal('admin_login')}
+                  className="px-2.5 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/30 transition flex items-center gap-1 text-xs font-medium cursor-pointer"
+                  title="এডমিন হিসেবে লগইন করে ডাটাবেজ আপলোড করুন"
+                >
+                  <Lock className="w-3 h-3 text-amber-400" />
+                  <span>এডমিন লগইন (আপলোড)</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Main Title */}
@@ -309,16 +356,26 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
                   <button
                     type="button"
                     onClick={() => setIsAdminModalOpen(true)}
-                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2"
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                   >
                     <Upload className="w-4 h-4" />
-                    আসন ফোল্ডার বা জিপ ফাইল আপলোড করুন
+                    <span>আসন ফোল্ডার বা জিপ ফাইল আপলোড করুন</span>
                   </button>
                 </>
               ) : (
-                <p className="text-[11px] text-emerald-200/80 leading-relaxed">
-                  ডাটাবেজে এখনও কোনো ভোটার তালিকা যুক্ত করা হয়নি। ভোটার ডাটা আপলোড করার জন্য অনুগ্রহ করে সিস্টেম অ্যাডমিনের সাথে যোগাযোগ করুন।
-                </p>
+                <div className="space-y-2">
+                  <p className="text-[11px] text-emerald-200/80 leading-relaxed">
+                    ডাটাবেজে এখনও কোনো ভোটার তালিকা যুক্ত করা হয়নি। সুপার এডমিন পাসওয়ার্ড দিয়ে লগইন করে সরাসরি আসন ফোল্ডার বা জিপ ফাইল আপলোড করুন।
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onOpenLoginModal && onOpenLoginModal('admin_login')}
+                    className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Lock className="w-4 h-4" />
+                    <span>সুপার এডমিন লগইন করে ডাটা আপলোড করুন</span>
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -515,12 +572,12 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
               </h2>
             </div>
 
-            {searchResults.length > 0 && isSuperAdmin && (
+            {searchResults.length > 0 && (
               <button
                 type="button"
-                onClick={handleExportExcelData}
+                onClick={() => handleRequestDownload('results')}
                 disabled={isExportingExcel}
-                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                 title="এই ফলাফল গুলো Excel (.xlsx) ফাইলে ডাউনলোড করুন"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
@@ -694,6 +751,67 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
         onClose={() => setIsAdminModalOpen(false)}
         onDatabaseUpdated={() => fetchDistricts(false)}
       />
+
+      {/* Admin Approval Dialog for Non-Admin Downloads */}
+      {showApprovalModal && (
+        <div className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-amber-500/50 rounded-2xl p-5 max-w-sm w-full text-white space-y-3.5 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mx-auto">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div className="text-center space-y-1">
+              <h4 className="font-bold text-sm text-white">🔒 এডমিন অনুমোদন আবশ্যক</h4>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                ভোটার ডাটাবেজ ডাউনলোড সুরক্ষিত। সাধারণ ইউজার বা দোকানদার ডাউনলোড করতে চাইলে সুপার এডমিনের পাসওয়ার্ড দিয়ে অনুমোদন করতে হবে।
+              </p>
+            </div>
+
+            <form onSubmit={handleApprovalSubmit} className="space-y-3 pt-1">
+              <div>
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  value={approvalPassword}
+                  onChange={(e) => {
+                    setApprovalPassword(e.target.value);
+                    setApprovalError('');
+                  }}
+                  placeholder="এডমিন পাসওয়ার্ড লিখুন (যেমন: admin123)"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+                {approvalError && (
+                  <p className="text-[11px] text-rose-400 mt-1.5 flex items-center gap-1 font-medium">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                    <span>{approvalError}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowApprovalModal(false);
+                    setApprovalPassword('');
+                    setApprovalError('');
+                  }}
+                  className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-md shadow-amber-950"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>অনুমোদন ও ডাউনলোড</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

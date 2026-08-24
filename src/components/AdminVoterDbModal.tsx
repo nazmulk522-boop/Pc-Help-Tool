@@ -57,8 +57,9 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
   onDataChanged,
   onOpenLoginModal,
 }) => {
-  const { currentProfile, isAuthenticated } = useShopAuth();
-  const isSuperAdmin = isAuthenticated && currentProfile.role === 'super_admin';
+  const { currentProfile, isSuperAdmin, loginAsAdmin, verifyAdminPassword } = useShopAuth();
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [unlockError, setUnlockError] = useState('');
 
   const notifyChange = () => {
     onDatabaseUpdated?.();
@@ -373,36 +374,70 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
   // Available seats for selected district in manual selector
   const districtSeats = BANGLADESH_DISTRICTS.find((d) => d.nameBn === selectedDistrict)?.seats || [];
 
+  const handleQuickUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (verifyAdminPassword(unlockPassword)) {
+      const email = currentProfile.ownerEmail || 'nazmulk522@gmail.com';
+      loginAsAdmin(email, unlockPassword);
+      setUnlockError('');
+    } else {
+      setUnlockError('ভুল এডমিন পাসওয়ার্ড! সঠিক পাসওয়ার্ড দিন।');
+    }
+  };
+
   if (!isSuperAdmin) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-        <div className="relative w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-6 text-center space-y-4 text-white shadow-2xl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+        <div className="relative w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-6 space-y-4 text-white shadow-2xl">
           <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
             <ShieldCheck className="w-6 h-6" />
           </div>
-          <h3 className="text-lg font-bold">অ্যাডমিন অ্যাক্সেস প্রয়োজন</h3>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            ভোটার ডাটাবেজ ও আসন ব্যবস্থাপনা শুধুমাত্র সুপার অ্যাডমিন এর জন্য সংরক্ষিত। সাধারণ ব্যবহারকারী বা দোকানদার শুধুমাত্র তথ্য সার্চ করতে পারবেন।
-          </p>
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={onClose}
-              className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition"
-            >
-              বন্ধ করুন
-            </button>
-            {onOpenLoginModal && (
-              <button
-                onClick={() => {
-                  onClose();
-                  onOpenLoginModal();
-                }}
-                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition"
-              >
-                লগইন করুন
-              </button>
-            )}
+          <div className="text-center space-y-1">
+            <h3 className="text-base sm:text-lg font-bold">সুপার এডমিন ভেরিফিকেশন</h3>
+            <p className="text-xs text-slate-400">
+              ভোটার ডাটাবেজ আপলোড ও আসন ম্যানেজমেন্ট করতে এডমিন পাসওয়ার্ড দিন।
+            </p>
           </div>
+
+          <form onSubmit={handleQuickUnlock} className="space-y-3 pt-1">
+            <div>
+              <input
+                type="password"
+                required
+                autoFocus
+                value={unlockPassword}
+                onChange={(e) => {
+                  setUnlockPassword(e.target.value);
+                  setUnlockError('');
+                }}
+                placeholder="এডমিন পাসওয়ার্ড দিন (যেমন: admin123)"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
+              {unlockError && (
+                <p className="text-[11px] text-rose-400 mt-1.5 font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {unlockError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition"
+              >
+                বাতিল
+              </button>
+              <button
+                type="submit"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>প্রবেশ করুন</span>
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     );
@@ -420,13 +455,13 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                ভোটার ডাটাবেইজ ও আসন ম্যানেজার
+                ভোটার ডাটাবেইজ আপলোড ও ডাউনলোড প্যানেল
                 <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded-full font-mono">
                   Super Admin
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                সিরাজগঞ্জ-২ সহ যেকোনো আসনের ফোল্ডার, জিপ ফাইল বা পিডিএফ ডাটাবেজে যুক্ত করুন
+                সিরাজগঞ্জ-২ সহ যেকোনো আসনের ফোল্ডার / জিপ আপলোড এবং এক্সেল ফাইল ডাউনলোড ও পরিচালনা
               </p>
             </div>
           </div>
@@ -438,7 +473,7 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Navigation */}
+        {/* Tab Navigation - Clean Upload & Download tabs */}
         <div className="flex border-b border-slate-800 bg-slate-950/40 text-xs font-semibold px-4 pt-2 gap-2 overflow-x-auto">
           <button
             onClick={() => setActiveTab('folder_upload')}
@@ -449,7 +484,7 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
             }`}
           >
             <FolderOpen className="w-4 h-4" />
-            <span>আসন ফোল্ডার আপলোড</span>
+            <span>📁 আসন ফোল্ডার আপলোড</span>
           </button>
 
           <button
@@ -461,7 +496,7 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
             }`}
           >
             <FolderArchive className="w-4 h-4" />
-            <span>জিপ ফাইল (.zip) আপলোড</span>
+            <span>📦 জিপ ফাইল (.zip) আপলোড</span>
           </button>
 
           <button
@@ -473,7 +508,7 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>সরাসরি PDF / Excel</span>
+            <span>📄 PDF / Excel ফাইল আপলোড</span>
           </button>
 
           <button
@@ -484,8 +519,8 @@ export const AdminVoterDbModal: React.FC<AdminVoterDbModalProps> = ({
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Layers className="w-4 h-4" />
-            <span>সংরক্ষিত আসনসমূহ ({stats?.seatStats.length || 0})</span>
+            <Download className="w-4 h-4" />
+            <span>📥 ডাটাবেজ ও আসন ডাউনলোড ({stats?.seatStats.length || 0})</span>
           </button>
         </div>
 
