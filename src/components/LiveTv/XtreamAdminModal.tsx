@@ -404,6 +404,21 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServerUrl('http://rgkkw.live:80');
+                      setUsername('1Aoen7elp5');
+                      setPassword('IgMJ60tmAa');
+                    }}
+                    className="text-[11px] text-cyan-400 hover:text-cyan-300 underline font-medium flex items-center gap-1"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>টেস্ট ক্রেডেনশিয়ালস পূরণ করুন (rgkkw.live)</span>
+                  </button>
+                </div>
+
                 <button
                   type="submit"
                   disabled={isLoading}
@@ -412,7 +427,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   {isLoading ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Xtream সার্ভারে কানেক্ট ও সিঙ্ক হচ্ছে...</span>
+                      <span>Xtream সার্ভারে কানেক্ট ও সিঙ্ক হচ্ছে (১১,৪০০+ চ্যানেল)...</span>
                     </>
                   ) : (
                     <>

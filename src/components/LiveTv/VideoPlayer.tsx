@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
+import mpegts from 'mpegts.js';
 import { 
   Play, 
   Pause, 
@@ -47,6 +48,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const mpegtsRef = useRef<any>(null);
   const controlsTimeoutRef = useRef<any>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -74,7 +76,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setFavState(isFavorite);
   }, [isFavorite]);
 
-  // Load and play HLS or native video
+  const destroyPlayers = () => {
+    if (hlsRef.current) {
+      try {
+        hlsRef.current.destroy();
+      } catch (e) {}
+      hlsRef.current = null;
+    }
+    if (mpegtsRef.current) {
+      try {
+        mpegtsRef.current.pause();
+        mpegtsRef.current.unload();
+        mpegtsRef.current.detachMediaElement();
+        mpegtsRef.current.destroy();
+      } catch (e) {}
+      mpegtsRef.current = null;
+    }
+  };
+
+  // Load and play HLS, MPEG-TS or native video
   const loadStream = useCallback((streamUrl: string) => {
     const video = videoRef.current;
     if (!video) return;
@@ -82,12 +102,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setIsLoading(true);
     setError(null);
     setStreamHealth('Buffering');
-
-    // Clean previous instance
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
+    destroyPlayers();
 
     // Determine effective URL (check if proxy needed)
     let urlToPlay = streamUrl;
@@ -96,6 +111,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       urlToPlay = `/api/iptv/proxy-stream?url=${encodeURIComponent(streamUrl)}`;
     }
 
+    const isTsStream = streamUrl.endsWith('.ts') || (!streamUrl.endsWith('.m3u8') && !streamUrl.includes('.m3u8'));
+
+    // 1. If TS stream, use mpegts.js
+    if (isTsStream && mpegts.isSupported()) {
+      try {
+        const player = mpegts.createPlayer(
+          {
+            type: 'mse',
+            isLive: true,
+            url: urlToPlay,
+          },
+          {
+            enableWorker: true,
+            lazyLoad: false,
+            liveBufferLatencyChasing: true,
+          }
+        );
+
+        mpegtsRef.current = player;
+        player.attachMediaElement(video);
+        player.load();
+
+        if (autoPlay) {
+          const playPromise = player.play();
+          if (playPromise && typeof (playPromise as any).catch === 'function') {
+            (playPromise as Promise<void>).catch(() => {
+              video.muted = true;
+              setIsMuted(true);
+              const retryPromise = player.play();
+              if (retryPromise && typeof (retryPromise as any).catch === 'function') {
+                (retryPromise as Promise<void>).catch(() => {});
+              }
+            });
+          }
+        }
+        setIsLoading(false);
+        setStreamHealth('Good');
+        return;
+      } catch (e) {
+        console.warn('mpegts error, falling back to HLS:', e);
+      }
+    }
+
+    // 2. HLS.js for .m3u8
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
@@ -117,7 +176,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setStreamHealth('Excellent');
         if (autoPlay) {
           video.play().catch(() => {
-            // Autoplay with sound might be blocked, retry muted
             video.muted = true;
             setIsMuted(true);
             video.play().catch((e) => console.warn('Autoplay failed:', e));
@@ -135,7 +193,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 hls.startLoad();
                 setRetryCount((prev) => prev + 1);
               } else {
-                // Fallback to proxy endpoint if direct fails
                 if (!urlToPlay.includes('/api/iptv/proxy-stream')) {
                   const proxyUrl = `/api/iptv/proxy-stream?url=${encodeURIComponent(streamUrl)}`;
                   hls.loadSource(proxyUrl);
@@ -176,7 +233,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         setIsLoading(false);
       });
     } else {
-      // Direct mp4 / standard stream
       video.src = urlToPlay;
     }
   }, [autoPlay, retryCount]);
@@ -189,10 +245,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      destroyPlayers();
     };
   }, [channel, loadStream]);
 

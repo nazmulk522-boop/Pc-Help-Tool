@@ -255,7 +255,17 @@ export async function authenticateXtreamCodes(
       body: JSON.stringify({ serverUrl, username, password }),
     });
 
-    const json = await res.json();
+    const text = await res.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch (parseErr) {
+      return {
+        success: false,
+        error: 'Xtream Codes সার্ভার থেকে অপ্রত্যাশিত রেসপন্স এসেছে। সার্ভার URL ও ক্রেডেনশিয়ালস সঠিক কিনা দেখুন।',
+      };
+    }
+
     if (!res.ok || !json.success) {
       return {
         success: false,
@@ -276,10 +286,11 @@ export async function authenticateXtreamCodes(
       });
     }
 
+    const cleanServerUrl = json.serverUrl || serverUrl;
     const account: XtreamAccount = {
       id: `xtream_${Date.now()}`,
-      name: userInfo.username ? `${userInfo.username} (${serverInfo.url || serverUrl})` : 'Xtream Server',
-      serverUrl: json.serverUrl || serverUrl,
+      name: userInfo.username ? `${userInfo.username} (${serverInfo.url || cleanServerUrl})` : 'Xtream Server',
+      serverUrl: cleanServerUrl,
       username,
       password,
       status: (userInfo.status as any) || 'Active',
@@ -298,6 +309,53 @@ export async function authenticateXtreamCodes(
     console.error('Xtream Auth Fetch Error:', err);
     return { success: false, error: err?.message || 'নেটওয়ার্ক বা সার্ভার কানেকশন এরর' };
   }
+}
+
+// In-memory channel cache for high performance
+let inMemoryChannels: IptvChannel[] = [];
+let inMemoryCategories: IptvCategory[] = [];
+
+// Helper to store in IndexedDB
+function saveChannelsToIndexedDB(channels: IptvChannel[], categories: IptvCategory[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      resolve(false);
+      return;
+    }
+    try {
+      const request = indexedDB.open('UltraXC_IPTV_DB', 2);
+      request.onupgradeneeded = (e: any) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('channels')) {
+          db.createObjectStore('channels', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('categories')) {
+          db.createObjectStore('categories', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = (e: any) => {
+        const db = e.target.result;
+        try {
+          const tx = db.transaction(['channels', 'categories'], 'readwrite');
+          const chanStore = tx.objectStore('channels');
+          const catStore = tx.objectStore('categories');
+          chanStore.clear();
+          catStore.clear();
+
+          channels.forEach((c) => chanStore.put(c));
+          categories.forEach((cat) => catStore.put(cat));
+
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        } catch (txErr) {
+          resolve(false);
+        }
+      };
+      request.onerror = () => resolve(false);
+    } catch (e) {
+      resolve(false);
+    }
+  });
 }
 
 // 6. Fetch Xtream Live Streams and Categories
@@ -322,8 +380,14 @@ export async function syncXtreamContent(account: XtreamAccount): Promise<{
       }),
     });
 
-    const catJson = await catRes.json();
-    const rawCategories = Array.isArray(catJson.data) ? catJson.data : [];
+    const catText = await catRes.text();
+    let rawCategories: any[] = [];
+    try {
+      const catJson = JSON.parse(catText);
+      rawCategories = Array.isArray(catJson.data) ? catJson.data : [];
+    } catch (e) {
+      rawCategories = [];
+    }
 
     // 2. Fetch live streams
     const streamRes = await fetch('/api/iptv/xtream-data', {
@@ -337,8 +401,14 @@ export async function syncXtreamContent(account: XtreamAccount): Promise<{
       }),
     });
 
-    const streamJson = await streamRes.json();
-    const rawStreams = Array.isArray(streamJson.data) ? streamJson.data : [];
+    const streamText = await streamRes.text();
+    let rawStreams: any[] = [];
+    try {
+      const streamJson = JSON.parse(streamText);
+      rawStreams = Array.isArray(streamJson.data) ? streamJson.data : [];
+    } catch (e) {
+      rawStreams = [];
+    }
 
     // Build category map
     const catMap = new Map<string, string>();
@@ -357,6 +427,8 @@ export async function syncXtreamContent(account: XtreamAccount): Promise<{
 
     // Clean server url for direct stream playback
     const cleanUrl = account.serverUrl.replace(/\/+$/, '');
+    const allowedFormats = (account.userInfo as any)?.allowed_output_formats || account.userInfo?.allowedOutputFormats || ['ts'];
+    const primaryExt = allowedFormats.includes('m3u8') ? 'm3u8' : 'ts';
 
     // Map channels
     const channels: IptvChannel[] = rawStreams.map((s: any, idx: number) => {
@@ -364,8 +436,8 @@ export async function syncXtreamContent(account: XtreamAccount): Promise<{
       const catId = String(s.category_id || 'general');
       const catName = catMap.get(catId) || 'General';
 
-      // Standard Xtream live stream URL format: http://host:port/live/username/password/stream_id.m3u8 or .ts
-      const streamUrl = `${cleanUrl}/live/${encodeURIComponent(account.username)}/${encodeURIComponent(account.password)}/${streamId}.m3u8`;
+      // Standard Xtream live stream URL format
+      const streamUrl = `${cleanUrl}/live/${encodeURIComponent(account.username)}/${encodeURIComponent(account.password)}/${streamId}.${primaryExt}`;
 
       // Update category count
       const foundCat = categories.find((c) => c.id === catId);
@@ -392,12 +464,39 @@ export async function syncXtreamContent(account: XtreamAccount): Promise<{
       };
     });
 
-    // Save cached channels in localStorage / memory
+    // Sort categories so that Bengali, Sports, Islamic, News come first
+    categories.sort((a, b) => {
+      if (a.id === 'all') return -1;
+      if (b.id === 'all') return 1;
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+      const isBanglaA = aName.includes('bengali') || aName.includes('bangla');
+      const isBanglaB = bName.includes('bengali') || bName.includes('bangla');
+      if (isBanglaA && !isBanglaB) return -1;
+      if (!isBanglaA && isBanglaB) return 1;
+      const isSportsA = aName.includes('sport');
+      const isSportsB = bName.includes('sport');
+      if (isSportsA && !isSportsB) return -1;
+      if (!isSportsA && isSportsB) return 1;
+      const isIslamicA = aName.includes('islam');
+      const isIslamicB = bName.includes('islam');
+      if (isIslamicA && !isIslamicB) return -1;
+      if (!isIslamicA && isIslamicB) return 1;
+      return (b.count || 0) - (a.count || 0);
+    });
+
+    // Store in memory & IndexedDB
+    inMemoryChannels = channels;
+    inMemoryCategories = categories;
+    await saveChannelsToIndexedDB(channels, categories);
+
+    // Save lightweight summary to localStorage safely
     try {
-      localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(channels.slice(0, 300))); // store top slice in ls
-      localStorage.setItem(STORAGE_KEYS.CUSTOM_CATEGORIES, JSON.stringify(categories));
+      localStorage.setItem('shop_iptv_active_source', account.id);
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(channels.slice(0, 150)));
+      localStorage.setItem(STORAGE_KEYS.CUSTOM_CATEGORIES, JSON.stringify(categories.slice(0, 50)));
     } catch (e) {
-      console.warn('Local storage limit for all channels:', e);
+      console.warn('Local storage quota reached, channels stored in IndexedDB & Memory');
     }
 
     return {
@@ -423,12 +522,21 @@ export function getAllAvailableChannels(activeSource = 'default'): {
 } {
   const favIds = getFavoriteChannelIds();
 
-  // Try custom cached channels first if not default
+  // 1. If memory has synced channels, return them
+  if (inMemoryChannels.length > 0) {
+    const enriched = inMemoryChannels.map((c) => ({
+      ...c,
+      isFavorite: favIds.includes(c.id),
+    }));
+    return { categories: inMemoryCategories, channels: enriched };
+  }
+
+  // 2. Try custom cached channels from localStorage
   try {
     const customChanRaw = localStorage.getItem(STORAGE_KEYS.CUSTOM_CHANNELS);
     const customCatRaw = localStorage.getItem(STORAGE_KEYS.CUSTOM_CATEGORIES);
 
-    if (activeSource !== 'default' && customChanRaw && customCatRaw) {
+    if (customChanRaw && customCatRaw) {
       const parsedChans: IptvChannel[] = JSON.parse(customChanRaw);
       const parsedCats: IptvCategory[] = JSON.parse(customCatRaw);
 
@@ -444,7 +552,7 @@ export function getAllAvailableChannels(activeSource = 'default'): {
     // fallback
   }
 
-  // Default rich channels
+  // 3. Default rich channels
   const channels = DEFAULT_IPTV_CHANNELS.map((c) => ({
     ...c,
     isFavorite: favIds.includes(c.id),

@@ -42,12 +42,14 @@ app.get('/api/health', (req, res) => {
 // IPTV & XTREAM CODES API PROXY ENDPOINTS
 // ==========================================
 
+const IPTV_USER_AGENT = 'IPTVSmartersPro/1.0.0 (Linux; Android 10; SmartTV)';
+
 // 1. Xtream Codes Authentication & Server Info
 app.post('/api/iptv/xtream-auth', async (req, res) => {
   try {
     let { serverUrl, username, password } = req.body;
     if (!serverUrl || !username || !password) {
-      return res.status(400).json({ error: 'Server URL, username, and password are required' });
+      return res.status(400).json({ success: false, error: 'Server URL, username, and password are required' });
     }
 
     serverUrl = serverUrl.trim().replace(/\/+$/, '');
@@ -58,24 +60,37 @@ app.post('/api/iptv/xtream-auth', async (req, res) => {
     const apiUrl = `${serverUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(apiUrl, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        'User-Agent': IPTV_USER_AGENT,
         Accept: 'application/json, text/plain, */*',
       },
     });
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: `Server responded with status ${response.status}`,
+    const text = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      console.warn('Xtream Auth non-JSON response:', text.substring(0, 200));
+      return res.status(400).json({
+        success: false,
+        error: `সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি (HTTP ${response.status})। সার্ভার URL (${serverUrl}) অথবা ইউজারনেম/পাসওয়ার্ড চেক করুন।`,
+        rawPreview: text.substring(0, 200),
       });
     }
 
-    const data = await response.json();
+    if (data.user_info && data.user_info.auth === 0) {
+      return res.status(401).json({
+        success: false,
+        error: 'ভুল ইউজারনেম বা পাসওয়ার্ড অথবা অ্যাকাউন্ট মেয়াদোত্তীর্ণ!',
+      });
+    }
+
     return res.json({
       success: true,
       serverUrl,
@@ -95,7 +110,7 @@ app.post('/api/iptv/xtream-data', async (req, res) => {
   try {
     let { serverUrl, username, password, action = 'get_live_streams', category_id, series_id, vod_id } = req.body;
     if (!serverUrl || !username || !password) {
-      return res.status(400).json({ error: 'Missing required credentials' });
+      return res.status(400).json({ success: false, error: 'Missing required credentials' });
     }
 
     serverUrl = serverUrl.trim().replace(/\/+$/, '');
@@ -117,24 +132,29 @@ app.post('/api/iptv/xtream-data', async (req, res) => {
     const apiUrl = `${serverUrl}/player_api.php?${queryParams}`;
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     const response = await fetch(apiUrl, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        'User-Agent': IPTV_USER_AGENT,
         Accept: 'application/json, text/plain, */*',
       },
     });
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: `Server error: ${response.status}`,
+    const text = await response.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      return res.status(400).json({
+        success: false,
+        error: `চ্যানেল ডেটা পার্স করা যায়নি (HTTP ${response.status})`,
+        data: [],
       });
     }
 
-    const data = await response.json();
     return res.json({
       success: true,
       data,
@@ -144,6 +164,7 @@ app.post('/api/iptv/xtream-data', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: error?.message || 'Failed to fetch Xtream data',
+      data: [],
     });
   }
 });
@@ -153,7 +174,7 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
   try {
     const { url } = req.body;
     if (!url) {
-      return res.status(400).json({ error: 'Playlist URL is required' });
+      return res.status(400).json({ success: false, error: 'Playlist URL is required' });
     }
 
     let targetUrl = url.trim();
@@ -162,12 +183,12 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     const response = await fetch(targetUrl, {
       signal: controller.signal,
       headers: {
-        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        'User-Agent': IPTV_USER_AGENT,
         Accept: '*/*',
       },
     });
@@ -175,6 +196,7 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
 
     if (!response.ok) {
       return res.status(response.status).json({
+        success: false,
         error: `Failed to download playlist: HTTP ${response.status}`,
       });
     }
@@ -195,7 +217,7 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
   }
 });
 
-// 4. Stream Proxy (for HLS streams with CORS issues)
+// 4. Stream Proxy (for HLS / TS live streams to bypass CORS and Mixed-Content)
 app.get('/api/iptv/proxy-stream', async (req, res) => {
   try {
     const streamUrl = req.query.url as string;
@@ -203,34 +225,66 @@ app.get('/api/iptv/proxy-stream', async (req, res) => {
       return res.status(400).send('Stream URL is required');
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
     const response = await fetch(streamUrl, {
+      signal: controller.signal,
       headers: {
-        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        'User-Agent': IPTV_USER_AGENT,
         Accept: '*/*',
       },
     });
+    clearTimeout(timeoutId);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Headers', '*');
 
+    const contentType = response.headers.get('content-type') || 'video/mp2t';
+    res.setHeader('Content-Type', contentType);
+
+    // If it's an HLS manifest, rewrite relative segment paths
+    if (contentType.includes('mpegurl') || streamUrl.endsWith('.m3u8')) {
+      const manifestText = await response.text();
+      const lines = manifestText.split('\n');
+      const rewritten = lines.map((line) => {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#')) {
+          try {
+            const absoluteChunkUrl = new URL(trimmed, streamUrl).href;
+            return `/api/iptv/proxy-stream?url=${encodeURIComponent(absoluteChunkUrl)}`;
+          } catch (e) {
+            return line;
+          }
+        }
+        return line;
+      }).join('\n');
+
+      return res.send(rewritten);
+    }
+
+    // Binary / TS stream piping
     if (!response.body) {
-      return res.status(500).send('No response stream body');
+      return res.status(500).send('No stream body');
     }
 
     const reader = response.body.getReader();
     const pump = async () => {
-      const { done, value } = await reader.read();
-      if (done) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          return;
+        }
+        res.write(value);
+        await pump();
+      } catch (streamErr) {
         res.end();
-        return;
       }
-      res.write(value);
-      await pump();
     };
     await pump();
   } catch (error: any) {
-    console.error('Stream Proxy Error:', error);
     if (!res.headersSent) {
       res.status(500).send('Stream proxy failed: ' + error?.message);
     }
