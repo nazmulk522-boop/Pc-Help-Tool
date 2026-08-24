@@ -44,63 +44,91 @@ app.get('/api/health', (req, res) => {
 
 const IPTV_USER_AGENT = 'IPTVSmartersPro/1.0.0 (Linux; Android 10; SmartTV)';
 
+async function tryFetchXtreamApi(baseUrl: string, queryParams: string, timeoutMs = 20000): Promise<{ ok: boolean; status: number; text: string; data?: any; successfulUrl?: string }> {
+  // Candidate URLs to try in case port was omitted or protocol varies
+  const clean = baseUrl.trim().replace(/\/+$/, '');
+  const urlWithProto = (!clean.startsWith('http://') && !clean.startsWith('https://')) ? `http://${clean}` : clean;
+  
+  const parsed = new URL(urlWithProto);
+  const host = parsed.hostname;
+  const currentPort = parsed.port;
+  const protocol = parsed.protocol;
+
+  const candidates: string[] = [urlWithProto];
+  if (!currentPort) {
+    candidates.push(`${protocol}//${host}:80`);
+    candidates.push(`${protocol}//${host}:8080`);
+    candidates.push(`${protocol}//${host}:8880`);
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const apiUrl = `${candidate}/player_api.php?${queryParams}`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+      const response = await fetch(apiUrl, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': IPTV_USER_AGENT,
+          Accept: 'application/json, text/plain, */*',
+        },
+      });
+      clearTimeout(timeoutId);
+
+      const text = await response.text();
+      try {
+        const data = JSON.parse(text);
+        if (data) {
+          return { ok: true, status: response.status, text, data, successfulUrl: candidate };
+        }
+      } catch (jsonErr) {
+        // Not valid JSON from this candidate, continue
+      }
+    } catch (netErr) {
+      // Continue to next candidate
+    }
+  }
+
+  return { ok: false, status: 500, text: 'No response or invalid format from Xtream server' };
+}
+
 // 1. Xtream Codes Authentication & Server Info
 app.post('/api/iptv/xtream-auth', async (req, res) => {
   try {
     let { serverUrl, username, password } = req.body;
     if (!serverUrl || !username || !password) {
-      return res.status(400).json({ success: false, error: 'Server URL, username, and password are required' });
+      return res.status(400).json({ success: false, error: 'সার্ভার URL, ইউজারনেম ও পাসওয়ার্ড পূরণ করুন।' });
     }
 
-    serverUrl = serverUrl.trim().replace(/\/+$/, '');
-    if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
-      serverUrl = `http://${serverUrl}`;
-    }
+    const queryParams = `username=${encodeURIComponent(username.trim())}&password=${encodeURIComponent(password.trim())}`;
+    const result = await tryFetchXtreamApi(serverUrl, queryParams, 20000);
 
-    const apiUrl = `${serverUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const response = await fetch(apiUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': IPTV_USER_AGENT,
-        Accept: 'application/json, text/plain, */*',
-      },
-    });
-    clearTimeout(timeoutId);
-
-    const text = await response.text();
-    let data: any;
-    try {
-      data = JSON.parse(text);
-    } catch (parseErr) {
-      console.warn('Xtream Auth non-JSON response:', text.substring(0, 200));
+    if (!result.ok || !result.data) {
       return res.status(400).json({
         success: false,
-        error: `সার্ভার থেকে সঠিক ডেটা পাওয়া যায়নি (HTTP ${response.status})। সার্ভার URL (${serverUrl}) অথবা ইউজারনেম/পাসওয়ার্ড চেক করুন।`,
-        rawPreview: text.substring(0, 200),
+        error: 'Xtream Codes সার্ভার থেকে অপ্রত্যাশিত রেসপন্স এসেছে। সার্ভার URL ও ইউজারনেম/পাসওয়ার্ড সঠিক কিনা যাচাই করুন।',
       });
     }
 
+    const data = result.data;
     if (data.user_info && data.user_info.auth === 0) {
       return res.status(401).json({
         success: false,
-        error: 'ভুল ইউজারনেম বা পাসওয়ার্ড অথবা অ্যাকাউন্ট মেয়াদোত্তীর্ণ!',
+        error: 'ভুল ইউজারনেম বা পাসওয়ার্ড অথবা অ্যাকাউন্টটির মেয়াদ শেষ হয়েছে!',
       });
     }
 
     return res.json({
       success: true,
-      serverUrl,
+      serverUrl: result.successfulUrl || serverUrl,
       data,
     });
   } catch (error: any) {
     console.error('Xtream Auth Error:', error);
     return res.status(500).json({
       success: false,
-      error: error?.name === 'AbortError' ? 'Xtream সার্ভারে কানেক্ট হতে বেশি সময় লেগেছে (Timeout)' : error?.message || 'Failed to authenticate with Xtream Codes',
+      error: error?.name === 'AbortError' ? 'Xtream সার্ভারে কানেক্ট হতে বেশি সময় লেগেছে (Timeout)।' : error?.message || 'Xtream প্রমাণীকরণ ব্যর্থ হয়েছে।',
     });
   }
 });
@@ -113,12 +141,7 @@ app.post('/api/iptv/xtream-data', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing required credentials' });
     }
 
-    serverUrl = serverUrl.trim().replace(/\/+$/, '');
-    if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
-      serverUrl = `http://${serverUrl}`;
-    }
-
-    let queryParams = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=${encodeURIComponent(action)}`;
+    let queryParams = `username=${encodeURIComponent(username.trim())}&password=${encodeURIComponent(password.trim())}&action=${encodeURIComponent(action)}`;
     if (category_id !== undefined && category_id !== '') {
       queryParams += `&category_id=${encodeURIComponent(category_id)}`;
     }
@@ -129,35 +152,19 @@ app.post('/api/iptv/xtream-data', async (req, res) => {
       queryParams += `&vod_id=${encodeURIComponent(vod_id)}`;
     }
 
-    const apiUrl = `${serverUrl}/player_api.php?${queryParams}`;
-    
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const result = await tryFetchXtreamApi(serverUrl, queryParams, 35000);
 
-    const response = await fetch(apiUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': IPTV_USER_AGENT,
-        Accept: 'application/json, text/plain, */*',
-      },
-    });
-    clearTimeout(timeoutId);
-
-    const text = await response.text();
-    let data: any;
-    try {
-      data = JSON.parse(text);
-    } catch (parseErr) {
+    if (!result.ok || !result.data) {
       return res.status(400).json({
         success: false,
-        error: `চ্যানেল ডেটা পার্স করা যায়নি (HTTP ${response.status})`,
+        error: `চ্যানেল ডেটা লোড করা যায়নি।`,
         data: [],
       });
     }
 
     return res.json({
       success: true,
-      data,
+      data: result.data,
     });
   } catch (error: any) {
     console.error('Xtream Data Error:', error);

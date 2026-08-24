@@ -497,7 +497,7 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -509,6 +509,47 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
                   >
                     <Sparkles className="w-3 h-3" />
                     <span>টেস্ট ক্রেডেনশিয়ালস পূরণ করুন (rgkkw.live)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={async () => {
+                      setServerUrl('http://rgkkw.live:80');
+                      setUsername('1Aoen7elp5');
+                      setPassword('IgMJ60tmAa');
+                      setFeedback(null);
+                      setIsLoading(true);
+                      try {
+                        const authRes = await authenticateXtreamCodes('http://rgkkw.live:80', '1Aoen7elp5', 'IgMJ60tmAa');
+                        if (!authRes.success || !authRes.account) {
+                          setFeedback({ type: 'error', message: authRes.error || 'লগইন ব্যর্থ হয়েছে।' });
+                          setIsLoading(false);
+                          return;
+                        }
+                        const syncRes = await syncXtreamContent(authRes.account);
+                        if (!syncRes.success) {
+                          setFeedback({
+                            type: 'error',
+                            message: `সার্ভার কানেক্ট হয়েছে কিন্তু চ্যানেল লোড করা যায়নি: ${syncRes.error}`,
+                          });
+                        } else {
+                          setFeedback({
+                            type: 'success',
+                            message: `সফলভাবে Xtream সার্ভার সংযুক্ত হয়েছে! (${syncRes.channels.length} টি লাইভ চ্যানেল লোড হয়েছে)`,
+                          });
+                          onPlaylistUpdated();
+                        }
+                      } catch (err: any) {
+                        setFeedback({ type: 'error', message: err?.message || 'কানেকশন ত্রুটি' });
+                      } finally {
+                        setIsLoading(false);
+                      }
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 hover:bg-emerald-900 font-medium flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Play className="w-3 h-3 text-emerald-400" />
+                    <span>১-ক্লিকে সরাসরি কানেক্ট করুন (Auto Connect)</span>
                   </button>
                 </div>
 

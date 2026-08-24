@@ -287,7 +287,7 @@ export async function authenticateXtreamCodes(
     } catch (parseErr) {
       return {
         success: false,
-        error: 'Xtream Codes সার্ভার থেকে অপ্রত্যাশিত রেসপন্স এসেছে। সার্ভার URL ও ক্রেডেনশিয়ালস সঠিক কিনা দেখুন।',
+        error: `সার্ভার থেকে সঠিক রেসপন্স পাওয়া যায়নি (Status: ${res.status})। সার্ভার ও ইন্টারনেট সংযোগ চেক করুন।`,
       };
     }
 
@@ -299,8 +299,8 @@ export async function authenticateXtreamCodes(
     }
 
     const data = json.data;
-    const userInfo = data.user_info || {};
-    const serverInfo = data.server_info || {};
+    const userInfo = data?.user_info || {};
+    const serverInfo = data?.server_info || {};
 
     let expDate = 'Unlimited';
     if (userInfo.exp_date && !isNaN(Number(userInfo.exp_date))) {
