@@ -38,6 +38,205 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ==========================================
+// IPTV & XTREAM CODES API PROXY ENDPOINTS
+// ==========================================
+
+// 1. Xtream Codes Authentication & Server Info
+app.post('/api/iptv/xtream-auth', async (req, res) => {
+  try {
+    let { serverUrl, username, password } = req.body;
+    if (!serverUrl || !username || !password) {
+      return res.status(400).json({ error: 'Server URL, username, and password are required' });
+    }
+
+    serverUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
+      serverUrl = `http://${serverUrl}`;
+    }
+
+    const apiUrl = `${serverUrl}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+    const response = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        Accept: 'application/json, text/plain, */*',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `Server responded with status ${response.status}`,
+      });
+    }
+
+    const data = await response.json();
+    return res.json({
+      success: true,
+      serverUrl,
+      data,
+    });
+  } catch (error: any) {
+    console.error('Xtream Auth Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.name === 'AbortError' ? 'Xtream সার্ভারে কানেক্ট হতে বেশি সময় লেগেছে (Timeout)' : error?.message || 'Failed to authenticate with Xtream Codes',
+    });
+  }
+});
+
+// 2. Xtream Codes Data (Categories, Live Streams, VOD Streams, Series)
+app.post('/api/iptv/xtream-data', async (req, res) => {
+  try {
+    let { serverUrl, username, password, action = 'get_live_streams', category_id, series_id, vod_id } = req.body;
+    if (!serverUrl || !username || !password) {
+      return res.status(400).json({ error: 'Missing required credentials' });
+    }
+
+    serverUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
+      serverUrl = `http://${serverUrl}`;
+    }
+
+    let queryParams = `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=${encodeURIComponent(action)}`;
+    if (category_id !== undefined && category_id !== '') {
+      queryParams += `&category_id=${encodeURIComponent(category_id)}`;
+    }
+    if (series_id !== undefined) {
+      queryParams += `&series_id=${encodeURIComponent(series_id)}`;
+    }
+    if (vod_id !== undefined) {
+      queryParams += `&vod_id=${encodeURIComponent(vod_id)}`;
+    }
+
+    const apiUrl = `${serverUrl}/player_api.php?${queryParams}`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(apiUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        Accept: 'application/json, text/plain, */*',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `Server error: ${response.status}`,
+      });
+    }
+
+    const data = await response.json();
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (error: any) {
+    console.error('Xtream Data Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Failed to fetch Xtream data',
+    });
+  }
+});
+
+// 3. Fetch remote M3U / M3U8 Playlist
+app.post('/api/iptv/fetch-m3u', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'Playlist URL is required' });
+    }
+
+    let targetUrl = url.trim();
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      targetUrl = `http://${targetUrl}`;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    const response = await fetch(targetUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        Accept: '*/*',
+      },
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `Failed to download playlist: HTTP ${response.status}`,
+      });
+    }
+
+    const text = await response.text();
+    return res.json({
+      success: true,
+      content: text,
+      url: targetUrl,
+      size: text.length,
+    });
+  } catch (error: any) {
+    console.error('Fetch M3U Error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error?.name === 'AbortError' ? 'প্লেলিস্ট ডাউনলোড হতে বেশি সময় নিয়েছে।' : error?.message || 'Failed to download M3U playlist',
+    });
+  }
+});
+
+// 4. Stream Proxy (for HLS streams with CORS issues)
+app.get('/api/iptv/proxy-stream', async (req, res) => {
+  try {
+    const streamUrl = req.query.url as string;
+    if (!streamUrl) {
+      return res.status(400).send('Stream URL is required');
+    }
+
+    const response = await fetch(streamUrl, {
+      headers: {
+        'User-Agent': 'UltraXCPlayer/2.5 (SmartTV; Android 12; Applet)',
+        Accept: '*/*',
+      },
+    });
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/vnd.apple.mpegurl');
+
+    if (!response.body) {
+      return res.status(500).send('No response stream body');
+    }
+
+    const reader = response.body.getReader();
+    const pump = async () => {
+      const { done, value } = await reader.read();
+      if (done) {
+        res.end();
+        return;
+      }
+      res.write(value);
+      await pump();
+    };
+    await pump();
+  } catch (error: any) {
+    console.error('Stream Proxy Error:', error);
+    if (!res.headersSent) {
+      res.status(500).send('Stream proxy failed: ' + error?.message);
+    }
+  }
+});
+
 // Background Removal API (Remove.bg integration & smart transparent cutout)
 app.post('/api/remove-bg', async (req, res) => {
   try {

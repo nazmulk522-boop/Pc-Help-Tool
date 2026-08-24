@@ -11,6 +11,7 @@ import { JointPhotoMaker } from './components/JointPhotoMaker';
 import { PhotoPrintSheet } from './components/PhotoPrintSheet';
 import { JobApplicationResizer } from './components/JobApplicationResizer';
 import { QuickReceiptAndDocs } from './components/QuickReceiptAndDocs';
+import { LiveTvContainer } from './components/LiveTv/LiveTvContainer';
 import { LoginProfileModal } from './components/LoginProfileModal';
 import { AdminVoterDbModal } from './components/AdminVoterDbModal';
 import { Zap, X } from 'lucide-react';
@@ -132,6 +133,7 @@ function MainApp() {
               onOpenVoterDbModal={handleOpenVoterDbModal}
             />
           )}
+          {activeTool === 'live_tv' && <LiveTvContainer />}
           {activeTool === 'voter_search' && (
             <VoterInfoSearch onOpenLoginModal={handleOpenLoginModal} />
           )}

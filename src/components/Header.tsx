@@ -39,6 +39,11 @@ export const Header: React.FC<HeaderProps> = ({
       subtitle: 'দোকানের সকল সার্ভিস ও ফটো স্টুডিও টুলকিট',
       tag: 'ALL TOOLS READY',
     },
+    live_tv: {
+      title: 'Ultra XC Live TV Player (লাইভ টিভি ও IPTV)',
+      subtitle: 'বাংলাদেশ ও আন্তর্জাতিক লাইভ টিভি চ্যানেল, মুভিজ ও Xtream Codes API সাপোর্ট',
+      tag: 'ULTRA XC IPTV ON',
+    },
     voter_search: {
       title: 'Advance NID Data Finder (ভোটার ও NID সার্চ)',
       subtitle: 'জেলা ও সংসদীয় আসন অনুযায়ী নাম, পিতা, মাতা, জন্ম তারিখ বা ভোটার নং দিয়ে যাচাই',

@@ -1,5 +1,6 @@
 export type ActiveTool = 
   | 'home'
+  | 'live_tv'
   | 'voter_search'
   | 'nid'
   | 'bg_remover'
@@ -202,4 +203,136 @@ export interface CoupleJointSettings {
   preset: string;
   order: 'p1_left' | 'p2_left';
   shoulderOverlap: number;
+}
+
+// ==========================================
+// ULTRA XC PLAYER / IPTV & XTREAM CODES TYPES
+// ==========================================
+
+export type IptvContentType = 'live' | 'vod' | 'series' | 'multiscreen' | 'epg' | 'catchup' | 'account' | 'speedtest' | 'settings';
+
+export interface IptvChannel {
+  id: string;
+  num?: number;
+  name: string;
+  streamType?: 'live' | 'movie' | 'series';
+  streamId?: string | number;
+  streamIcon?: string;
+  epgChannelId?: string;
+  categoryId?: string;
+  categoryName?: string;
+  streamUrl: string;
+  isFavorite?: boolean;
+  resolution?: string; // 'HD', 'FHD', '4K', 'SD'
+  currentProgram?: string;
+  nextProgram?: string;
+}
+
+export interface IptvCategory {
+  id: string;
+  name: string;
+  count?: number;
+  icon?: string;
+}
+
+export interface IptvVodItem {
+  id: string;
+  streamId: string | number;
+  name: string;
+  title?: string;
+  year?: string;
+  streamIcon?: string;
+  rating?: string | number;
+  genre?: string;
+  plot?: string;
+  cast?: string;
+  duration?: string;
+  streamUrl: string;
+  categoryId?: string;
+  categoryName?: string;
+  containerExtension?: string;
+}
+
+export interface IptvSeriesItem {
+  id: string;
+  seriesId: string | number;
+  name: string;
+  title?: string;
+  cover?: string;
+  genre?: string;
+  plot?: string;
+  cast?: string;
+  rating?: string | number;
+  releaseDate?: string;
+  categoryId?: string;
+  categoryName?: string;
+  seasons?: Array<{
+    seasonNumber: number;
+    name: string;
+    episodeCount: number;
+    episodes: Array<{
+      id: string;
+      episodeNum: number;
+      title: string;
+      streamUrl: string;
+      duration?: string;
+    }>;
+  }>;
+}
+
+export interface XtreamAccount {
+  id: string;
+  name: string;
+  serverUrl: string;
+  username: string;
+  password: string;
+  status?: 'Active' | 'Expired' | 'Banned' | 'Trial' | 'Connecting' | 'Error';
+  expDate?: string;
+  maxConnections?: string | number;
+  activeCons?: string | number;
+  createdAt: string;
+  updatedAt?: string;
+  isDefault?: boolean;
+  serverInfo?: {
+    url?: string;
+    port?: string;
+    httpsPort?: string;
+    serverProtocol?: string;
+    rtmpPort?: string;
+    timezone?: string;
+    timestampNow?: number;
+    timeNow?: string;
+    version?: string;
+  };
+  userInfo?: {
+    username?: string;
+    status?: string;
+    expDate?: string;
+    isTrial?: string;
+    activeCons?: string;
+    createdAt?: string;
+    maxConnections?: string;
+    allowedOutputFormats?: string[];
+  };
+}
+
+export interface M3uPlaylist {
+  id: string;
+  name: string;
+  url?: string;
+  rawM3u?: string;
+  channelCount: number;
+  lastUpdated: string;
+  isDefault?: boolean;
+}
+
+export interface IptvPlayerState {
+  currentChannel: IptvChannel | null;
+  isPlaying: boolean;
+  volume: number;
+  isMuted: boolean;
+  isFullscreen: boolean;
+  aspectRatio: '16:9' | '4:3' | 'fill' | 'original';
+  quality: string;
+  autoPlay: boolean;
 }

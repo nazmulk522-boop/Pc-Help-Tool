@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ActiveTool } from '../types';
 import { useShopAuth } from '../context/ShopAuthContext';
 import {
+  Tv,
   Search,
   CreditCard,
   Palette,
@@ -46,7 +47,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     titleBn: string;
     titleEn: string;
     descBn: string;
-    category: 'voter' | 'studio' | 'print' | 'docs';
+    category: 'voter' | 'studio' | 'print' | 'docs' | 'entertainment';
     categoryLabel: string;
     categoryColor: string;
     icon: React.ElementType;
@@ -55,6 +56,21 @@ export const HomePage: React.FC<HomePageProps> = ({
     badge: string;
     features: string[];
   }> = [
+    {
+      id: 'live_tv',
+      titleBn: 'লাইভ টিভি ও বিনোদন (Ultra XC Live TV & IPTV)',
+      titleEn: 'Ultra XC Live TV Player & Xtream Code API',
+      descBn:
+        'Ultra XC Player ডিজাইনে বাংলাদেশ ও বিশ্বসংবাদ, খেলাধুলা, ইসলামিক ও বিনোদন লাইভ চ্যানেল সরাসরি দেখুন। সুপার এডমিন Xtream API ও M3U প্লেলিস্ট সাপোর্ট।',
+      category: 'entertainment',
+      categoryLabel: 'লাইভ টিভি ও IPTV',
+      categoryColor: 'bg-rose-50 text-rose-700 border-rose-200',
+      icon: Tv,
+      iconBg: 'bg-gradient-to-r from-rose-600 to-indigo-600',
+      iconColor: 'text-white',
+      badge: 'Ultra XC IPTV',
+      features: ['Xtream Codes API ও M3U প্লেলিস্ট', 'মাল্টি-স্ক্রিন ও EPG গাইড', '1080p FHD ও 4K স্ট্রিমিং'],
+    },
     {
       id: 'voter_search',
       titleBn: 'Advance NID Finder (ভোটার তথ্য সার্চ)',

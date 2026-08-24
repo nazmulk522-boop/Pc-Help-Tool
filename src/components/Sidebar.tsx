@@ -1,6 +1,7 @@
 import React from 'react';
 import { 
   Home,
+  Tv,
   CreditCard, 
   Palette, 
   Users, 
@@ -12,7 +13,8 @@ import {
   ShieldCheck,
   Store,
   Sparkles,
-  Upload
+  Upload,
+  Play
 } from 'lucide-react';
 import { ActiveTool } from '../types';
 import { useShopAuth } from '../context/ShopAuthContext';
@@ -31,6 +33,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenVoterDbModal 
 }) => {
   const { currentProfile, isLoggedIn, isSuperAdmin } = useShopAuth();
+
+  const tvTools: Array<{
+    id: ActiveTool;
+    nameBn: string;
+    icon: React.ElementType;
+    badge?: string;
+    badgeColor?: string;
+  }> = [
+    {
+      id: 'live_tv',
+      nameBn: 'লাইভ টিভি (Live TV)',
+      icon: Tv,
+      badge: 'Ultra XC',
+      badgeColor: 'bg-rose-600 text-white font-bold animate-pulse',
+    },
+  ];
 
   const voterTools: Array<{
     id: ActiveTool;
@@ -127,10 +145,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Navigation Groups */}
       <nav className="flex-1 py-2.5 text-xs overflow-y-auto space-y-3.5 scrollbar-thin scrollbar-thumb-slate-700">
         {/* Primary Home / Dashboard Link */}
-        <div className="px-2">
+        <div className="px-2 space-y-1">
           <button
             onClick={() => setActiveTool('home')}
-            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors text-xs font-bold ${
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-left transition-colors text-xs font-bold ${
               activeTool === 'home'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-200 hover:bg-slate-800 hover:text-white'
@@ -144,6 +162,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
               activeTool === 'home' ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-400'
             }`}>
               মেনু
+            </span>
+          </button>
+
+          {/* LIVE TV Button with Vibrant Accent */}
+          <button
+            onClick={() => setActiveTool('live_tv')}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-all text-xs font-bold ${
+              activeTool === 'live_tv'
+                ? 'bg-gradient-to-r from-rose-600 to-indigo-600 text-white shadow-lg shadow-rose-950/60 ring-1 ring-white/30'
+                : 'bg-slate-800/60 text-slate-200 hover:bg-gradient-to-r hover:from-rose-900/40 hover:to-indigo-900/40 hover:text-white border border-slate-700/50'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Tv className={`w-4 h-4 shrink-0 ${activeTool === 'live_tv' ? 'text-white' : 'text-rose-400'}`} />
+              <span className="tracking-wide">লাইভ টিভি (Live TV)</span>
+            </div>
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-600 text-white font-black uppercase tracking-wider animate-pulse">
+              LIVE
             </span>
           </button>
         </div>
