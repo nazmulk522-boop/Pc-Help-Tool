@@ -10,35 +10,38 @@ import {
   Printer, 
   Copy, 
   Check, 
-  Lock, 
   RotateCcw, 
-  ShieldCheck, 
   FileText, 
   CheckCircle2, 
-  LayoutGrid, 
-  List, 
-  Sparkles, 
   AlertCircle, 
-  Info,
-  ChevronDown,
-  Briefcase,
-  KeyRound,
-  Download,
   Eye,
   SlidersHorizontal,
-  PlusCircle
+  Upload,
+  Database,
+  Lock,
+  ArrowRight,
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { VoterRecord } from '../types';
 import { 
   searchVoters, 
   getActiveDistrictsAndSeats, 
   ActiveDistrictInfo,
-  restoreDefaultSampleRecords
+  getAllVotersBySeat
 } from '../utils/voterDb';
+import { 
+  exportSeatToExcel, 
+  exportAllVotersToExcel 
+} from '../utils/pdfVoterParser';
 import { VoterSlipModal } from './VoterSlipModal';
 import { AdminVoterDbModal } from './AdminVoterDbModal';
+import { useShopAuth } from '../context/ShopAuthContext';
 
 export const VoterInfoSearch: React.FC = () => {
+  const { currentProfile, isAuthenticated } = useShopAuth();
+  const isSuperAdmin = isAuthenticated && currentProfile.role === 'super_admin';
+
   // Active districts and seats loaded dynamically from Database
   const [activeDistricts, setActiveDistricts] = useState<ActiveDistrictInfo[]>([]);
   const [totalDbVoters, setTotalDbVoters] = useState<number>(0);
@@ -49,7 +52,7 @@ export const VoterInfoSearch: React.FC = () => {
   const [selectedDistrict, setSelectedDistrict] = useState<string>('');
   const [selectedSeat, setSelectedSeat] = useState<string>('');
 
-  // Input Fields from Screenshot
+  // Input Fields
   const [nameQuery, setNameQuery] = useState<string>('');
   const [fatherQuery, setFatherQuery] = useState<string>('');
   const [motherQuery, setMotherQuery] = useState<string>('');
@@ -58,9 +61,9 @@ export const VoterInfoSearch: React.FC = () => {
   const [occupationQuery, setOccupationQuery] = useState<string>('');
   const [isExact, setIsExact] = useState<boolean>(false);
 
-  // Search execution state
+  // Search execution state - Default to FALSE so NO results show before search
   const [isSearching, setIsSearching] = useState<boolean>(false);
-  const [hasSearched, setHasSearched] = useState<boolean>(true);
+  const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<VoterRecord[]>([]);
   const [totalMatches, setTotalMatches] = useState<number>(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -112,6 +115,15 @@ export const VoterInfoSearch: React.FC = () => {
     return currentDistrictObj.seats;
   }, [currentDistrictObj]);
 
+  // All uploaded seats across all districts in DB
+  const allUploadedSeats = useMemo(() => {
+    const list: { seatNo: string; count: number }[] = [];
+    activeDistricts.forEach((d) => {
+      d.seats.forEach((s) => list.push(s));
+    });
+    return list;
+  }, [activeDistricts]);
+
   // When District changes, auto-select first seat of that district
   const handleDistrictChange = (dist: string) => {
     setSelectedDistrict(dist);
@@ -127,19 +139,49 @@ export const VoterInfoSearch: React.FC = () => {
     }
   };
 
-  // Perform search
-  const handleSearch = useCallback(async (e?: React.FormEvent, overrideDist?: string, overrideSeat?: string) => {
+  // Export to Excel (.xlsx) handler
+  const [isExportingExcel, setIsExportingExcel] = useState<boolean>(false);
+  const handleExportExcelData = async () => {
+    try {
+      setIsExportingExcel(true);
+      if (hasSearched && searchResults.length > 0) {
+        exportSeatToExcel(selectedSeat || selectedDistrict || 'Search_Results', searchResults);
+        return;
+      }
+      if (selectedSeat) {
+        const list = await getAllVotersBySeat(selectedSeat);
+        if (list.length > 0) {
+          exportSeatToExcel(selectedSeat, list);
+        } else {
+          alert('এই আসনের কোনো ডাটা পাওয়া যায়নি।');
+        }
+        return;
+      }
+      // Full database export
+      const allList = await getAllVotersBySeat('all');
+      if (allList.length > 0) {
+        exportAllVotersToExcel(allList);
+      } else {
+        alert('ডাটাবেজে বর্তমানে কোনো ভোটার তথ্য নেই।');
+      }
+    } catch (e) {
+      console.error('Export error:', e);
+      alert('এক্সেল ফাইল তৈরিতে সমস্যা হয়েছে।');
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
+
+  // Perform search only when user clicks Search button
+  const handleSearch = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setIsSearching(true);
     setHasSearched(true);
 
-    const distToUse = overrideDist !== undefined ? overrideDist : selectedDistrict;
-    const seatToUse = overrideSeat !== undefined ? overrideSeat : selectedSeat;
-
     try {
       const res = await searchVoters({
-        district: distToUse && distToUse !== 'Select District' ? distToUse : undefined,
-        seatNo: seatToUse && seatToUse !== 'সকল আসন' ? seatToUse : undefined,
+        district: selectedDistrict && selectedDistrict !== 'Select District' ? selectedDistrict : undefined,
+        seatNo: selectedSeat && selectedSeat !== 'সকল আসন' ? selectedSeat : undefined,
         name: nameQuery,
         fatherName: fatherQuery,
         motherName: motherQuery,
@@ -158,14 +200,7 @@ export const VoterInfoSearch: React.FC = () => {
     }
   }, [selectedDistrict, selectedSeat, nameQuery, fatherQuery, motherQuery, voterNoQuery, dobQuery, occupationQuery, isExact]);
 
-  // Initial load search when selected district / seat is set
-  useEffect(() => {
-    if (selectedDistrict) {
-      handleSearch(undefined, selectedDistrict, selectedSeat);
-    }
-  }, [selectedDistrict]);
-
-  // Clear all filters
+  // Clear all filters and reset search results
   const handleReset = () => {
     setNameQuery('');
     setFatherQuery('');
@@ -174,20 +209,9 @@ export const VoterInfoSearch: React.FC = () => {
     setDobQuery('');
     setOccupationQuery('');
     setIsExact(false);
-    if (activeDistricts.length > 0) {
-      const defaultDist = activeDistricts[0].name;
-      const defaultSeat = activeDistricts[0].seats.length > 0 ? activeDistricts[0].seats[0].seatNo : '';
-      setSelectedDistrict(defaultDist);
-      setSelectedSeat(defaultSeat);
-      handleSearch(undefined, defaultDist, defaultSeat);
-    }
-  };
-
-  // Restore sample demo if database is empty
-  const handleRestoreDemoData = async () => {
-    await restoreDefaultSampleRecords();
-    await fetchDistricts(false);
-    handleSearch();
+    setHasSearched(false);
+    setSearchResults([]);
+    setTotalMatches(0);
   };
 
   // Copy voter information formatted
@@ -217,466 +241,459 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Centered Advance Nid Data Finder Container */}
+      {/* Main Advance Nid Data Finder Box */}
       <div className="max-w-md sm:max-w-lg mx-auto">
-        {/* Dark Container wrapping the screenshot form */}
         <div className="bg-[#0b0f19] border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-5 text-slate-100 relative overflow-hidden">
-          {/* Subtle glow effect in background */}
+          
+          {/* Top subtle glow effect */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
           <div className="absolute -bottom-24 -left-24 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-          {/* Top Admin Lock Icon (Discreet for Owner) */}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-mono tracking-widest text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-              SEBAHUB NID FINDER
-            </span>
-            <button
-              onClick={() => setIsAdminModalOpen(true)}
-              title="এডমিন ডাটাবেজ প্যানেল (ম্যানেজ / আপলোড)"
-              className="p-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-800 transition flex items-center gap-1.5 text-xs"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span className="text-[11px] font-medium hidden sm:inline">ডাটাবেজ এডমিন</span>
-            </button>
+          {/* Top Admin Action bar */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5" />
+              <span>NID Data Finder</span>
+            </div>
+
+            {isSuperAdmin && (
+              <div className="flex items-center gap-2">
+                {totalDbVoters > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportExcelData}
+                    disabled={isExportingExcel}
+                    className="px-2.5 py-1 rounded-xl bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-700/60 transition flex items-center gap-1 text-xs font-medium"
+                    title="ডাটাবেজ এক্সেল (.xlsx) ফাইলে ডাউনলোড করুন"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{isExportingExcel ? 'তৈরি হচ্ছে...' : 'Excel ডাউনলোড'}</span>
+                  </button>
+                )}
+
+                {/* Admin Upload Trigger */}
+                <button
+                  type="button"
+                  onClick={() => setIsAdminModalOpen(true)}
+                  className="px-3 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-emerald-400 border border-slate-700/80 transition flex items-center gap-1.5 text-xs font-medium"
+                >
+                  <Upload className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>ডাটাবেইজ আপলোড</span>
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Main Title & Subtitle */}
-          <div className="text-center space-y-1.5 pt-1">
+          {/* Main Title */}
+          <div className="text-center space-y-1 pt-1">
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
               Advance Nid Data Finder
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 font-medium">
-              ভোটার নম্বর আনলক চার্জ: 100 টাকা
+            <p className="text-xs text-slate-400">
+              ভোটার তালিকা ও এনআইডি তথ্য অনুসন্ধান
             </p>
-          </div>
-
-          {/* Stats Box (Districts & Voters) */}
-          <div className="bg-[#121826] border border-slate-800/80 rounded-2xl p-4 grid grid-cols-2 text-center divide-x divide-slate-800">
-            <div className="px-2">
-              <div className="text-xl sm:text-2xl font-bold text-white tracking-wide font-mono">
-                {totalDbDistricts > 0 ? totalDbDistricts : '64'}
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">
-                {totalDbDistricts > 0 ? 'Active Districts' : 'Districts'}
-              </div>
-            </div>
-            <div className="px-2">
-              <div className="text-xl sm:text-2xl font-bold text-white tracking-wide font-mono">
-                {totalDbVoters > 0 ? totalDbVoters.toLocaleString('en-US') : '124,259,613'}
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-0.5">
-                {totalDbVoters > 0 ? 'Added Voters' : 'Voters'}
-              </div>
-            </div>
           </div>
 
           {/* Empty DB Notice if 0 districts added */}
           {activeDistricts.length === 0 && !isLoadingDistricts && (
-            <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-xs text-amber-300 space-y-2">
-              <div className="flex items-center gap-2 font-bold">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>ডাটাবেজে এখনও কোনো জেলা বা আসন যুক্ত করা হয়নি।</span>
+            <div className="p-4 bg-emerald-950/30 border border-emerald-800/40 rounded-2xl text-xs text-emerald-200 space-y-3">
+              <div className="flex items-center gap-2 font-bold text-emerald-300">
+                <AlertCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>ডাটাবেজে কোনো আসনের তথ্য নেই</span>
               </div>
-              <p className="text-[11px] text-amber-200/80">
-                এডমিন প্যানেলে প্রবেশ করে জিপ ফাইল, সিএসভি আপলোড করুন অথবা প্রাথমিক ডেমো ডাটাবেজ রিস্টোর করুন।
-              </p>
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={handleRestoreDemoData}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition"
-                >
-                  ডেমো ডাটা লোড করুন (ঢাকা-১০, কুমিল্লা-৬, বগুড়া-৬)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsAdminModalOpen(true)}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-lg text-xs transition"
-                >
-                  ফাইল আপলোড করুন
-                </button>
-              </div>
+              {isSuperAdmin ? (
+                <>
+                  <p className="text-[11px] text-emerald-200/80 leading-relaxed">
+                    আপনার সংসদীয় আসনের জিপ ফাইল (.zip) বা ফোল্ডার (যেমন: বগুড়া ১ বা সিরাজগঞ্জ-২) সরাসরি আপলোড করুন। ফোল্ডারের ভেতরে ইউনিয়ন ও গ্রামের পিডিএফ স্বয়ংক্রিয়ভাবে পড়ে সার্চে যুক্ত হয়ে যাবে।
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAdminModalOpen(true)}
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    আসন ফোল্ডার বা জিপ ফাইল আপলোড করুন
+                  </button>
+                </>
+              ) : (
+                <p className="text-[11px] text-emerald-200/80 leading-relaxed">
+                  ডাটাবেজে এখনও কোনো ভোটার তালিকা যুক্ত করা হয়নি। ভোটার ডাটা আপলোড করার জন্য অনুগ্রহ করে সিস্টেম অ্যাডমিনের সাথে যোগাযোগ করুন।
+                </p>
+              )}
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSearch} className="space-y-3.5 pt-1">
-            {/* 1. Select District Dropdown (Only Added Districts from DB) */}
-            <div className="relative">
-              <select
-                id="select-district-field"
-                value={selectedDistrict}
-                onChange={(e) => handleDistrictChange(e.target.value)}
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 appearance-none focus:outline-none focus:ring-1 focus:ring-emerald-500 transition cursor-pointer"
-              >
-                {activeDistricts.length === 0 ? (
-                  <option value="">Select District (কোন জেলা যুক্ত নেই)</option>
-                ) : (
-                  <>
-                    <option value="">Select District (জেলা নির্বাচন)</option>
-                    {activeDistricts.map((d) => (
-                      <option key={d.name} value={d.name}>
-                        {d.name} {d.nameEn ? `(${d.nameEn})` : ''} — {d.seats.length}টি আসন ({d.totalVoters.toLocaleString('en-US')} জন)
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+          {/* Main Search Form */}
+          <form onSubmit={handleSearch} className="space-y-4">
+            
+            {/* Row 1: District Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Select District (আপলোডকৃত জেলা)</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={selectedDistrict}
+                  onChange={(e) => handleDistrictChange(e.target.value)}
+                  disabled={activeDistricts.length === 0}
+                  className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-500 transition appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {activeDistricts.length === 0 ? (
+                    <option value="">কোনো জেলা আপলোড করা হয়নি</option>
+                  ) : (
+                    <>
+                      <option value="">সকল জেলা ({totalDbDistricts}টি জেলা)</option>
+                      {activeDistricts.map((d) => (
+                        <option key={d.name} value={d.name}>
+                          {d.name} ({d.totalVoters.toLocaleString('bn-BD')} ভোটার)
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </select>
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                  ▼
+                </div>
+              </div>
             </div>
 
-            {/* 2. Select Seat Dropdown (Only Added Seats for that District from DB) */}
-            {selectedDistrict && currentDistrictObj && currentDistrictObj.seats.length > 0 && (
-              <div className="relative animate-fadeIn">
+            {/* Row 2: Seat Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-blue-400" />
+                <span>Select Seat (আপলোডকৃত সংসদীয় আসন)</span>
+              </label>
+              <div className="relative">
                 <select
-                  id="select-seat-field"
                   value={selectedSeat}
                   onChange={(e) => setSelectedSeat(e.target.value)}
-                  className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-emerald-300 appearance-none focus:outline-none focus:ring-1 focus:ring-emerald-500 transition cursor-pointer"
+                  disabled={activeDistricts.length === 0}
+                  className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white focus:outline-none focus:border-blue-500 transition appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <option value="সকল আসন">সকল আসন ({selectedDistrict} জেলা - {currentDistrictObj.totalVoters.toLocaleString('en-US')} জন)</option>
-                  {availableSeats.map((s) => (
-                    <option key={s.seatNo} value={s.seatNo}>
-                      {s.seatNo} ({s.count.toLocaleString('en-US')} জন ভোটার)
-                    </option>
-                  ))}
+                  {activeDistricts.length === 0 ? (
+                    <option value="">কোনো আসন আপলোড করা হয়নি</option>
+                  ) : (
+                    <>
+                      <option value="">সকল আসন</option>
+                      {(selectedDistrict ? availableSeats : allUploadedSeats).map((seat) => (
+                        <option key={seat.seatNo} value={seat.seatNo}>
+                          {seat.seatNo} ({seat.count.toLocaleString('bn-BD')} ভোটার)
+                        </option>
+                      ))}
+                    </>
+                  )}
                 </select>
-                <ChevronDown className="w-4 h-4 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-xs">
+                  ▼
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* 3. Search by name... */}
-            <div>
+            {/* Row 3: Name */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-slate-400" />
+                <span>নাম (বাংলা বা ইংরেজিতে)</span>
+              </label>
               <input
-                id="input-search-by-name"
                 type="text"
                 value={nameQuery}
                 onChange={(e) => setNameQuery(e.target.value)}
-                placeholder="Search by name..."
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+                placeholder="যেমন: মো: নাজমুল হাসান"
+                className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition"
               />
             </div>
 
-            {/* 4. Father's name... */}
-            <div>
+            {/* Row 4: Father's Name */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-slate-400" />
+                <span>পিতার নাম</span>
+              </label>
               <input
-                id="input-father-name"
                 type="text"
                 value={fatherQuery}
                 onChange={(e) => setFatherQuery(e.target.value)}
-                placeholder="Father's name..."
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+                placeholder="পিতার নাম লিখুন"
+                className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition"
               />
             </div>
 
-            {/* 5. Mother's name... */}
-            <div>
+            {/* Row 5: Mother's Name */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-slate-400" />
+                <span>মাতার নাম</span>
+              </label>
               <input
-                id="input-mother-name"
                 type="text"
                 value={motherQuery}
                 onChange={(e) => setMotherQuery(e.target.value)}
-                placeholder="Mother's name..."
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
+                placeholder="মাতার নাম লিখুন"
+                className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 transition"
               />
             </div>
 
-            {/* 6. Voter no... */}
-            <div>
+            {/* Row 6: Voter No / NID / PIN */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                <span>ভোটার নং / এনআইডি / পিন</span>
+              </label>
               <input
-                id="input-voter-no"
                 type="text"
                 value={voterNoQuery}
                 onChange={(e) => setVoterNoQuery(e.target.value)}
-                placeholder="Voter no..."
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition font-mono"
+                placeholder="ভোটার নং অথবা জাতীয় পরিচয়পত্র নম্বর"
+                className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 font-mono transition"
               />
             </div>
 
-            {/* 7. DOB (YYYY-MM-DD) */}
-            <div>
+            {/* Row 7: Date of Birth */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                <span>জন্ম তারিখ (দিন/মাস/বছর)</span>
+              </label>
               <input
-                id="input-dob"
                 type="text"
                 value={dobQuery}
                 onChange={(e) => setDobQuery(e.target.value)}
-                placeholder="DOB (YYYY-MM-DD)"
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition font-mono"
+                placeholder="DD/MM/YYYY (যেমন: 15/10/1992)"
+                className="w-full bg-[#121826] border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 font-mono transition"
               />
             </div>
 
-            {/* 8. Occupation... */}
-            <div>
-              <input
-                id="input-occupation"
-                type="text"
-                value={occupationQuery}
-                onChange={(e) => setOccupationQuery(e.target.value)}
-                placeholder="Occupation..."
-                className="w-full h-12 px-4 bg-[#121826] border border-slate-800 hover:border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-medium text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition"
-              />
-            </div>
+            {/* Exact Match Checkbox */}
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={isExact}
+                  onChange={(e) => setIsExact(e.target.checked)}
+                  className="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0 w-4 h-4 cursor-pointer"
+                />
+                <span>হুবহু মিল (Exact Match)</span>
+              </label>
 
-            {/* 9. Bright Green Search Button */}
-            <div className="pt-1">
-              <button
-                id="btn-advance-search"
-                type="submit"
-                disabled={isSearching}
-                className="w-full h-12 bg-[#238636] hover:bg-[#2ea043] active:bg-[#1f702d] text-white font-bold text-base rounded-xl transition shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {isSearching ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>খোঁজা হচ্ছে...</span>
-                  </>
-                ) : (
-                  <span>Search</span>
-                )}
-              </button>
-            </div>
-
-            {/* 10. Exact Switch Toggle */}
-            <div className="flex items-center justify-between pt-1 px-1">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  id="toggle-exact-switch"
-                  onClick={() => setIsExact(!isExact)}
-                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out cursor-pointer ${
-                    isExact ? 'bg-emerald-500 justify-end' : 'bg-slate-700 justify-start'
-                  }`}
-                >
-                  <span className="bg-white w-4 h-4 rounded-full shadow-md transform transition-transform"></span>
-                </button>
-                <label
-                  onClick={() => setIsExact(!isExact)}
-                  className="text-sm font-medium text-slate-300 cursor-pointer select-none"
-                >
-                  Exact
-                </label>
-              </div>
-
-              {(nameQuery || fatherQuery || motherQuery || voterNoQuery || dobQuery || occupationQuery) && (
+              {(nameQuery || fatherQuery || motherQuery || voterNoQuery || dobQuery) && (
                 <button
                   type="button"
                   onClick={handleReset}
-                  className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 transition underline"
+                  className="text-xs text-slate-400 hover:text-rose-400 transition flex items-center gap-1"
                 >
                   <RotateCcw className="w-3 h-3" />
                   <span>রিসেট</span>
                 </button>
               )}
             </div>
+
+            {/* Submit Search Button */}
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="w-full py-3.5 bg-linear-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-2xl text-sm shadow-xl shadow-emerald-950/50 transition flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer"
+            >
+              <Search className={`w-4 h-4 ${isSearching ? 'animate-spin' : ''}`} />
+              <span>{isSearching ? 'অনুসন্ধান চলছে...' : 'ভোটার তথ্য খুঁজুন'}</span>
+            </button>
           </form>
         </div>
       </div>
 
-      {/* Results Header & Summary */}
-      <div className="max-w-5xl mx-auto space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-xs">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-sm font-bold text-slate-900">
-              ফলাফল: <span className="text-emerald-700 font-mono font-black">{totalMatches}</span> জন ভোটার পাওয়া গেছে
-            </h2>
-            {selectedDistrict && (
-              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                জেলা: {selectedDistrict} {selectedSeat && selectedSeat !== 'সকল আসন' ? `(${selectedSeat})` : ''}
-              </span>
-            )}
-            {isExact && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                EXACT MATCH
-              </span>
-            )}
-          </div>
-
-          <div className="text-xs text-slate-500 flex items-center gap-3">
-            <span>স্লিপ প্রিন্ট অথবা সরাসরি কপি করে কাস্টমারকে দিতে পারবেন</span>
-          </div>
-        </div>
-
-        {/* Results List */}
-        {isSearching ? (
-          <div className="bg-white border border-slate-200 rounded-xl p-12 text-center shadow-xs">
-            <div className="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-            <p className="text-sm font-bold text-slate-700">ভোটার ডাটাবেজ সার্চ হচ্ছে...</p>
-            <p className="text-xs text-slate-400 mt-1">অনুগ্রহ করে কয়েক সেকেন্ড অপেক্ষা করুন</p>
-          </div>
-        ) : searchResults.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-xl p-10 text-center shadow-xs space-y-3">
-            <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-              <Search className="w-6 h-6" />
+      {/* SEARCH RESULTS SECTION - ONLY SHOWN AFTER USER CLICKS SEARCH */}
+      {hasSearched && (
+        <div className="max-w-4xl mx-auto space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-bold text-slate-800 flex items-center gap-2">
+                <span>অনুসন্ধানের ফলাফল</span>
+                <span className="text-xs font-semibold bg-blue-100 text-blue-800 px-2.5 py-0.5 rounded-full font-mono">
+                  {totalMatches.toLocaleString('bn-BD')} টি পাওয়া গেছে
+                </span>
+              </h2>
             </div>
-            <h3 className="text-base font-bold text-slate-800">কোন ভোটার তথ্য পাওয়া যায়নি</h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto">
-              অনুরোধ: জেলা পরিবর্তন করে দেখুন অথবা নামের বানান বাংলায় বা ইংরেজিতে কিছুটা পরিবর্তন করে সার্চ করুন। 'Exact' অফ রেখে আংশিক নাম দিয়েও চেষ্টা করতে পারেন।
-            </p>
-            {activeDistricts.length > 0 && (
+
+            {searchResults.length > 0 && isSuperAdmin && (
               <button
-                onClick={handleReset}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition"
+                type="button"
+                onClick={handleExportExcelData}
+                disabled={isExportingExcel}
+                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
+                title="এই ফলাফল গুলো Excel (.xlsx) ফাইলে ডাউনলোড করুন"
               >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>ফিল্টার রিসেট করে প্রথম আসনের তালিকা দেখুন</span>
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>{isExportingExcel ? 'ডাউনলোড হচ্ছে...' : 'ফলাফল Excel ডাউনলোড'}</span>
               </button>
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {searchResults.map((voter) => (
-              <div
-                key={voter.id}
-                className="bg-white border border-slate-200 hover:border-emerald-500/80 rounded-2xl p-4 sm:p-5 shadow-xs hover:shadow-md transition space-y-3.5 relative group"
-              >
-                {/* Voter Card Header */}
-                <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-base font-black text-slate-900">
+
+          {searchResults.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {searchResults.map((voter) => (
+                <div
+                  key={voter.id}
+                  className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs hover:shadow-md transition space-y-3 relative group"
+                >
+                  {/* Top Header Card */}
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5">
+                    <div>
+                      <h3 className="font-bold text-slate-900 text-sm sm:text-base">
                         {voter.nameBn}
-                      </span>
-                      {voter.gender && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold uppercase">
-                          {voter.gender === 'male' ? 'পুরুষ' : voter.gender === 'female' ? 'মহিলা' : voter.gender}
-                        </span>
+                      </h3>
+                      {voter.nameEn && (
+                        <p className="text-xs text-slate-500 font-mono uppercase">{voter.nameEn}</p>
                       )}
                     </div>
-                    {voter.nameEn && (
-                      <p className="text-xs font-mono text-slate-500 font-semibold uppercase">
-                        {voter.nameEn}
+                    <div className="text-right">
+                      <span className="text-[11px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md">
+                        {voter.seatNo || voter.district}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Detail Grid */}
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">পিতার নাম:</span>
+                      <span className="font-semibold text-slate-800">{voter.fatherName || '—'}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">মাতার নাম:</span>
+                      <span className="font-semibold text-slate-800">{voter.motherName || '—'}</span>
+                    </div>
+
+                    {voter.spouseName && (
+                      <div className="col-span-2">
+                        <span className="text-slate-500 block text-[11px]">স্বামী/স্ত্রী:</span>
+                        <span className="font-semibold text-slate-800">{voter.spouseName}</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">ভোটার নং:</span>
+                      <div className="flex items-center gap-1 font-mono font-bold text-blue-700">
+                        <span>{voter.voterNo || '—'}</span>
+                        {voter.voterNo && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopySingle(voter.voterNo, voter.id)}
+                            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700"
+                            title="কপি করুন"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">জাতীয় পরিচয়পত্র:</span>
+                      <div className="flex items-center gap-1 font-mono font-bold text-slate-900">
+                        <span>{voter.nidNo || '—'}</span>
+                        {voter.nidNo && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopySingle(voter.nidNo, voter.id)}
+                            className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-700"
+                            title="কপি করুন"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">জন্ম তারিখ:</span>
+                      <span className="font-mono text-slate-800 font-medium">{voter.dob || '—'}</span>
+                    </div>
+
+                    <div>
+                      <span className="text-slate-500 block text-[11px]">লিঙ্গ:</span>
+                      <span className="text-slate-800 font-medium">
+                        {voter.gender === 'female' ? 'মহিলা' : voter.gender === 'other' ? 'তৃতীয় লিঙ্গ' : 'পুরুষ'}
+                      </span>
+                    </div>
+
+                    <div className="col-span-2 pt-1 border-t border-slate-100">
+                      <span className="text-slate-500 block text-[11px]">ঠিকানা / এলাকা:</span>
+                      <p className="text-slate-700 text-[11px] leading-relaxed">
+                        {[voter.villageArea, voter.unionWard, voter.upazilaThana, voter.district]
+                          .filter(Boolean)
+                          .join(', ')}
                       </p>
+                    </div>
+
+                    {voter.pollingCenter && (
+                      <div className="col-span-2">
+                        <span className="text-slate-500 block text-[11px]">ভোট কেন্দ্র:</span>
+                        <p className="text-slate-700 text-[11px] font-medium">{voter.pollingCenter}</p>
+                      </div>
                     )}
                   </div>
 
-                  <span className="text-[11px] font-black px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
-                    {voter.seatNo}
-                  </span>
-                </div>
-
-                {/* Voter Numbers Grid (Voter No & NID No with Copy) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-150 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-semibold">ভোটার নং:</span>
+                  {/* Actions */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                     <button
-                      onClick={() => handleCopySingle(voter.voterNo, voter.id)}
-                      className="font-mono font-bold text-slate-800 hover:text-emerald-600 flex items-center gap-1 group/btn"
-                      title="কপি করতে ক্লিক করুন"
+                      type="button"
+                      onClick={() => handleCopyVoter(voter)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition flex items-center gap-1.5"
                     >
-                      <span>{voter.voterNo}</span>
-                      {copiedId === `${voter.id}-${voter.voterNo}` ? (
-                        <Check className="w-3 h-3 text-emerald-600" />
+                      {copiedId === voter.id ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-emerald-600">কপি হয়েছে</span>
+                        </>
                       ) : (
-                        <Copy className="w-3 h-3 text-slate-400 group-hover/btn:text-emerald-600 opacity-0 group-hover:opacity-100 transition" />
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-slate-500" />
+                          <span>সম্পূর্ণ তথ্য কপি</span>
+                        </>
                       )}
                     </button>
-                  </div>
 
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 font-semibold">NID নং:</span>
                     <button
-                      onClick={() => handleCopySingle(voter.nidNo, voter.id)}
-                      className="font-mono font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1 group/btn"
-                      title="কপি করতে ক্লিক করুন"
+                      type="button"
+                      onClick={() => setSlipVoter(voter)}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5"
                     >
-                      <span>{voter.nidNo}</span>
-                      {copiedId === `${voter.id}-${voter.nidNo}` ? (
-                        <Check className="w-3 h-3 text-emerald-600" />
-                      ) : (
-                        <Copy className="w-3 h-3 text-slate-400 group-hover/btn:text-blue-600 opacity-0 group-hover:opacity-100 transition" />
-                      )}
+                      <Printer className="w-3.5 h-3.5" />
+                      <span>ভোটার স্লিপ প্রিন্ট</span>
                     </button>
                   </div>
                 </div>
-
-                {/* Details Table */}
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs text-slate-700">
-                  <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold">পিতার নাম</span>
-                    <span className="font-semibold">{voter.fatherName || '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold">মাতার নাম</span>
-                    <span className="font-semibold">{voter.motherName || '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold">জন্ম তারিখ</span>
-                    <span className="font-mono font-semibold">{voter.dob || '—'}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold">পেশা / রক্ত</span>
-                    <span className="font-semibold">
-                      {voter.occupation || '—'} {voter.bloodGroup ? `(${voter.bloodGroup})` : ''}
-                    </span>
-                  </div>
-                  <div className="col-span-2 pt-1 border-t border-slate-100">
-                    <span className="text-slate-400 block text-[10px] uppercase font-bold">ঠিকানা ও কেন্দ্র</span>
-                    <p className="text-slate-600 text-[11px] leading-tight">
-                      {voter.villageArea}, {voter.unionWard}, {voter.upazilaThana}, {voter.district}
-                    </p>
-                    <p className="text-slate-500 text-[10px] mt-0.5 font-medium">
-                      কেন্দ্র: {voter.pollingCenter}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Bottom Card Actions */}
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
-                  <button
-                    onClick={() => handleCopyVoter(voter)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
-                  >
-                    {copiedId === voter.id ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span className="text-emerald-700">কপি হয়েছে</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5 text-slate-500" />
-                        <span>তথ্য কপি</span>
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => setSlipVoter(voter)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>স্লিপ প্রিন্ট (Print Slip)</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center space-y-2">
+              <AlertCircle className="w-8 h-8 text-slate-400 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-800">কোনো ভোটার তথ্য পাওয়া যায়নি</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                আপনার দেওয়া নামের বানান বা ভোটার নম্বর পরীক্ষা করুন, অথবা আসন নির্বাচন পরিবর্তন করে আবার চেষ্টা করুন।
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Slip Modal */}
       {slipVoter && (
         <VoterSlipModal
-          voter={slipVoter}
           isOpen={!!slipVoter}
           onClose={() => setSlipVoter(null)}
+          voter={slipVoter}
         />
       )}
 
-      {/* Admin Database Management Modal (PIN Protected) */}
-      {isAdminModalOpen && (
-        <AdminVoterDbModal
-          isOpen={isAdminModalOpen}
-          onClose={() => {
-            setIsAdminModalOpen(false);
-            fetchDistricts();
-          }}
-          onDataChanged={() => {
-            fetchDistricts(false);
-            handleSearch();
-          }}
-        />
-      )}
+      {/* Database & Seat Upload Admin Modal */}
+      <AdminVoterDbModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onDatabaseUpdated={() => fetchDistricts(false)}
+      />
     </div>
   );
 };

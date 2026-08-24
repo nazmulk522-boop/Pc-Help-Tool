@@ -2,6 +2,7 @@ import JSZip from 'jszip';
 import { VoterRecord, VoterSearchField } from '../types';
 import { INITIAL_SAMPLE_VOTERS } from '../data/sampleVoters';
 import { BANGLADESH_DISTRICTS } from '../data/bangladeshSeats';
+import { bnToEnDigits } from './pdfVoterParser';
 
 const DB_NAME = 'BD_VOTER_HUB_DB_V2';
 const DB_VERSION = 1;
@@ -39,24 +40,14 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-// Seed with default realistic sample voters if empty
+// Database initialization
 export async function ensureDatabaseInitialized(): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const tx = db.transaction(STORE_NAME, 'readonly');
     const store = tx.objectStore(STORE_NAME);
     const countReq = store.count();
-
-    countReq.onsuccess = () => {
-      if (countReq.result === 0) {
-        // Insert sample voters
-        for (const voter of INITIAL_SAMPLE_VOTERS) {
-          store.put(voter);
-        }
-      }
-      resolve();
-    };
-
+    countReq.onsuccess = () => resolve();
     countReq.onerror = () => reject(countReq.error);
   });
 }
@@ -64,7 +55,8 @@ export async function ensureDatabaseInitialized(): Promise<void> {
 // Bengali and English text normalization for accurate search
 export function normalizeSearchString(str?: string | number | null): string {
   if (!str) return '';
-  return String(str)
+  const converted = bnToEnDigits(String(str));
+  return converted
     .trim()
     .toLowerCase()
     .normalize('NFC')
@@ -182,13 +174,56 @@ export async function searchVoters(filters: SearchFilters): Promise<SearchResult
           }
 
           if (match && normOcc) {
-            const occMatch = testMatch(voter.occupation, normOcc) || testMatch(voter.villageArea, normOcc);
-            if (!occMatch) match = false;
+            if (!testMatch(voter.occupation, normOcc)) match = false;
           }
 
-          // Check generic query if present
+          // Single general query check across all fields
           if (match && normQuery) {
-            match = matchesQuery(voter, normQuery, field, isExact);
+            let queryMatched = false;
+            switch (field) {
+              case 'voter_no':
+                queryMatched = testMatch(voter.voterNo, normQuery);
+                break;
+              case 'nid':
+                queryMatched = testMatch(voter.nidNo, normQuery);
+                break;
+              case 'name':
+                queryMatched = testMatch(voter.nameBn, normQuery) || testMatch(voter.nameEn, normQuery);
+                break;
+              case 'father':
+                queryMatched = testMatch(voter.fatherName, normQuery);
+                break;
+              case 'mother':
+                queryMatched = testMatch(voter.motherName, normQuery);
+                break;
+              case 'dob':
+                queryMatched = testMatch(voter.dob, normQuery);
+                break;
+              case 'address':
+                queryMatched = testMatch(voter.villageArea, normQuery) || testMatch(voter.unionWard, normQuery) || testMatch(voter.upazilaThana, normQuery);
+                break;
+              case 'serial':
+                queryMatched = testMatch(voter.serialNo, normQuery);
+                break;
+              case 'all':
+              default:
+                queryMatched =
+                  testMatch(voter.nameBn, normQuery) ||
+                  testMatch(voter.nameEn, normQuery) ||
+                  testMatch(voter.fatherName, normQuery) ||
+                  testMatch(voter.motherName, normQuery) ||
+                  testMatch(voter.spouseName, normQuery) ||
+                  testMatch(voter.voterNo, normQuery) ||
+                  testMatch(voter.nidNo, normQuery) ||
+                  testMatch(voter.formNo, normQuery) ||
+                  testMatch(voter.dob, normQuery) ||
+                  testMatch(voter.villageArea, normQuery) ||
+                  testMatch(voter.unionWard, normQuery) ||
+                  testMatch(voter.upazilaThana, normQuery) ||
+                  testMatch(voter.pollingCenter, normQuery);
+                break;
+            }
+            if (!queryMatched) match = false;
           }
         }
 
@@ -196,21 +231,28 @@ export async function searchVoters(filters: SearchFilters): Promise<SearchResult
           results.push(voter);
         }
 
+        // Limit results for fast response
+        const maxLimit = filters.limit || 200;
+        if (results.length >= maxLimit) {
+          // Finish cursor early
+          const page = filters.page || 1;
+          resolve({
+            voters: results,
+            totalMatches: results.length,
+            page,
+            totalPages: 1,
+          });
+          return;
+        }
+
         cursor.continue();
       } else {
-        // Pagination
         const page = filters.page || 1;
-        const limit = filters.limit || 50;
-        const totalMatches = results.length;
-        const totalPages = Math.ceil(totalMatches / limit) || 1;
-        const startIndex = (page - 1) * limit;
-        const pagedVoters = results.slice(startIndex, startIndex + limit);
-
         resolve({
-          voters: pagedVoters,
-          totalMatches,
+          voters: results,
+          totalMatches: results.length,
           page,
-          totalPages,
+          totalPages: 1,
         });
       }
     };
@@ -219,72 +261,44 @@ export async function searchVoters(filters: SearchFilters): Promise<SearchResult
   });
 }
 
-function matchesQuery(voter: VoterRecord, normQuery: string, field: VoterSearchField, isExact = false): boolean {
-  if (!normQuery) return true;
+// Get all voters for a specific seat (e.g. for Excel export)
+export async function getAllVotersBySeat(seatNo?: string): Promise<VoterRecord[]> {
+  await ensureDatabaseInitialized();
+  const db = await openDb();
 
-  const check = (val?: string | number | null) => {
-    if (!val) return false;
-    const norm = normalizeSearchString(val);
-    return isExact ? norm === normQuery : norm.includes(normQuery);
-  };
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const results: VoterRecord[] = [];
 
-  switch (field) {
-    case 'name':
-      return check(voter.nameBn) || check(voter.nameEn);
-    case 'father':
-      return check(voter.fatherName);
-    case 'mother':
-      return check(voter.motherName);
-    case 'dob':
-      return check(voter.dob);
-    case 'nid':
-      return check(voter.nidNo) || check(voter.formNo);
-    case 'voter_no':
-      return check(voter.voterNo);
-    case 'address':
-      return (
-        check(voter.villageArea) ||
-        check(voter.unionWard) ||
-        check(voter.upazilaThana) ||
-        check(voter.pollingCenter) ||
-        check(voter.voterAreaCode)
-      );
-    case 'serial':
-      return check(voter.serialNo);
-    case 'all':
-    default:
-      return (
-        check(voter.nameBn) ||
-        check(voter.nameEn) ||
-        check(voter.fatherName) ||
-        check(voter.motherName) ||
-        check(voter.spouseName) ||
-        check(voter.voterNo) ||
-        check(voter.nidNo) ||
-        check(voter.formNo) ||
-        check(voter.dob) ||
-        check(voter.villageArea) ||
-        check(voter.unionWard) ||
-        check(voter.upazilaThana) ||
-        check(voter.pollingCenter) ||
-        check(voter.voterAreaCode) ||
-        check(voter.serialNo)
-      );
-  }
+    const req = seatNo && seatNo !== 'all'
+      ? store.index('seatNo').openCursor(IDBKeyRange.only(seatNo))
+      : store.openCursor();
+
+    req.onsuccess = (e) => {
+      const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+      if (cursor) {
+        results.push(cursor.value);
+        cursor.continue();
+      } else {
+        resolve(results);
+      }
+    };
+
+    req.onerror = () => reject(req.error);
+  });
 }
 
-// Stats & Seat-wise record count
-export interface SeatStat {
-  seatNo: string;
-  district: string;
-  division: string;
-  count: number;
-}
-
+// Database Statistics Summary
 export interface DbStats {
   totalVoters: number;
+  totalDistricts: number;
   totalSeats: number;
-  seatStats: SeatStat[];
+  seatStats: {
+    district: string;
+    seatNo: string;
+    count: number;
+  }[];
 }
 
 export async function getDatabaseStats(): Promise<DbStats> {
@@ -294,56 +308,61 @@ export async function getDatabaseStats(): Promise<DbStats> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
     const store = tx.objectStore(STORE_NAME);
-    const seatMap: Record<string, { district: string; division: string; count: number }> = {};
-    let totalVoters = 0;
+    const countReq = store.count();
 
-    const cursorReq = store.openCursor();
-    cursorReq.onsuccess = (e) => {
-      const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
-      if (cursor) {
-        totalVoters++;
-        const voter: VoterRecord = cursor.value;
-        const seat = voter.seatNo || 'অনির্ধারিত আসন';
-        if (!seatMap[seat]) {
-          seatMap[seat] = {
-            district: voter.district || '',
-            division: voter.division || '',
-            count: 0,
-          };
+    countReq.onsuccess = () => {
+      const totalVoters = countReq.result;
+      const seatCounts: Record<string, { district: string; count: number }> = {};
+      const districtsSet = new Set<string>();
+
+      const cursorReq = store.openCursor();
+      cursorReq.onsuccess = (e) => {
+        const cursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          const item: VoterRecord = cursor.value;
+          const seatKey = item.seatNo || 'অনির্ধারিত আসন';
+          let dist = item.district || 'অনির্ধারিত জেলা';
+
+          if (dist) districtsSet.add(dist);
+
+          if (!seatCounts[seatKey]) {
+            seatCounts[seatKey] = { district: dist, count: 0 };
+          }
+          seatCounts[seatKey].count++;
+
+          cursor.continue();
+        } else {
+          const seatStats = Object.entries(seatCounts).map(([seatNo, data]) => ({
+            district: data.district,
+            seatNo,
+            count: data.count,
+          })).sort((a, b) => b.count - a.count);
+
+          resolve({
+            totalVoters,
+            totalDistricts: districtsSet.size,
+            totalSeats: Object.keys(seatCounts).length,
+            seatStats,
+          });
         }
-        seatMap[seat].count++;
-        cursor.continue();
-      } else {
-        const seatStats: SeatStat[] = Object.entries(seatMap).map(([seatNo, data]) => ({
-          seatNo,
-          district: data.district,
-          division: data.division,
-          count: data.count,
-        })).sort((a, b) => b.count - a.count);
+      };
 
-        resolve({
-          totalVoters,
-          totalSeats: seatStats.length,
-          seatStats,
-        });
-      }
+      cursorReq.onerror = () => reject(cursorReq.error);
     };
 
-    cursorReq.onerror = () => reject(cursorReq.error);
+    countReq.onerror = () => reject(countReq.error);
   });
 }
 
-// Active Districts and Seats that actually have data added in the database
-export interface ActiveSeatInfo {
-  seatNo: string;
-  count: number;
-}
-
+// Active Districts & Seats list dynamically derived from IndexedDB
 export interface ActiveDistrictInfo {
   name: string;
   nameEn?: string;
   totalVoters: number;
-  seats: ActiveSeatInfo[];
+  seats: {
+    seatNo: string;
+    count: number;
+  }[];
 }
 
 export async function getActiveDistrictsAndSeats(): Promise<{
@@ -359,7 +378,7 @@ export async function getActiveDistrictsAndSeats(): Promise<{
     let distName = item.district?.trim();
     if (!distName || distName === 'অনির্ধারিত জেলা') {
       const deduced = deduceDistrictAndDivision(item.seatNo);
-      distName = deduced.district || 'ঢাকা';
+      distName = deduced.district || 'সিরাজগঞ্জ';
     } else {
       const match = BANGLADESH_DISTRICTS.find(
         (d) => d.nameBn === distName || d.nameEn.toLowerCase() === distName.toLowerCase()
@@ -409,7 +428,6 @@ export async function bulkInsertVoters(records: VoterRecord[]): Promise<number> 
     let inserted = 0;
 
     for (const record of records) {
-      // Ensure unique ID
       if (!record.id) {
         record.id = `vtr-${record.seatNo || 'gen'}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
       }
@@ -431,7 +449,6 @@ export async function deleteVotersBySeat(seatNo: string): Promise<number> {
     const store = tx.objectStore(STORE_NAME);
     let deleted = 0;
 
-    // Open cursor over all records to safely match exact or trimmed/normalized seatNo
     const normalizedTarget = seatNo.trim().toLowerCase();
     const req = store.openCursor();
 
@@ -467,12 +484,6 @@ export async function clearEntireDatabase(): Promise<void> {
   });
 }
 
-// Restore default demo records
-export async function restoreDefaultSampleRecords(): Promise<number> {
-  await clearEntireDatabase();
-  return await bulkInsertVoters(INITIAL_SAMPLE_VOTERS);
-}
-
 // Add or edit single voter record
 export async function saveSingleVoter(voter: VoterRecord): Promise<void> {
   const db = await openDb();
@@ -500,210 +511,105 @@ export async function deleteSingleVoter(id: string): Promise<void> {
   });
 }
 
-// ----------------- FILE PARSERS (CSV / JSON / ZIP) -----------------
-
-// Helper to deduce District from Seat Name (e.g. "ঢাকা-১০" -> "ঢাকা", "কুমিল্লা-৬" -> "কুমিল্লা")
-export function deduceDistrictAndDivision(seatNo: string, fallbackDistrict = 'ঢাকা'): { district: string; division: string } {
+// Helper to deduce District from Seat Name
+export function deduceDistrictAndDivision(seatNo: string, fallbackDistrict = 'সিরাজগঞ্জ'): { district: string; division: string } {
   const clean = seatNo.split('-')[0].trim();
   for (const dist of BANGLADESH_DISTRICTS) {
     if (clean === dist.nameBn || dist.nameEn.toLowerCase() === clean.toLowerCase() || seatNo.includes(dist.nameBn)) {
       return { district: dist.nameBn, division: dist.divisionBn };
     }
   }
-  return { district: fallbackDistrict, division: 'ঢাকা' };
+  return { district: fallbackDistrict, division: 'রাজশাহী' };
 }
 
-// Smart CSV Parser (handles comma, tab, semicolon delimiters)
-export function parseVotersFromCsv(csvText: string, defaultDistrict = 'ঢাকা', defaultSeat = 'ঢাকা-১০'): VoterRecord[] {
+// Legacy parsers support
+export function parseVotersFromCsv(csvText: string, defaultDistrict = 'সিরাজগঞ্জ', defaultSeat = 'সিরাজগঞ্জ-২'): VoterRecord[] {
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) return [];
 
-  // Detect delimiter: comma or tab or semicolon
-  const headerLine = lines[0];
-  let delimiter = ',';
-  if (headerLine.includes('\t')) delimiter = '\t';
-  else if (headerLine.includes(';') && !headerLine.includes(',')) delimiter = ';';
-
-  const rawHeaders = headerLine.split(delimiter).map((h) => h.replace(/^["']|["']$/g, '').trim());
-
-  // Map header indexes
+  const headers = lines[0].split(/[,\t;]/).map((h) => h.replace(/^["']|["']$/g, '').trim().toLowerCase());
   const headerMap: Record<string, number> = {};
-  rawHeaders.forEach((h, idx) => {
-    const lower = h.toLowerCase();
-    if (lower.includes('name') || lower.includes('নাম') || lower.includes('voter_name')) headerMap['name'] = idx;
-    if (lower.includes('father') || lower.includes('পিতা') || lower.includes('f_name')) headerMap['father'] = idx;
-    if (lower.includes('mother') || lower.includes('মাতা') || lower.includes('m_name')) headerMap['mother'] = idx;
-    if (lower.includes('spouse') || lower.includes('স্বামী') || lower.includes('স্ত্রী')) headerMap['spouse'] = idx;
-    if (lower.includes('nid') || lower.includes('জাতীয়') || lower.includes('এনআইডি') || lower.includes('smart_id')) headerMap['nid'] = idx;
-    if (lower.includes('voter_no') || lower.includes('ভোটার নং') || lower.includes('voterno') || lower.includes('pin')) headerMap['voter_no'] = idx;
-    if (lower.includes('form') || lower.includes('ফরম')) headerMap['form_no'] = idx;
-    if (lower.includes('dob') || lower.includes('জন্ম') || lower.includes('birth')) headerMap['dob'] = idx;
-    if (lower.includes('gender') || lower.includes('লিঙ্গ') || lower.includes('sex')) headerMap['gender'] = idx;
-    if (lower.includes('blood') || lower.includes('রক্ত')) headerMap['blood'] = idx;
-    if (lower.includes('serial') || lower.includes('ক্রমিক') || lower.includes('sl') || lower.includes('no')) headerMap['serial'] = idx;
-    if (lower.includes('address') || lower.includes('ঠিকানা') || lower.includes('গ্রাম') || lower.includes('মহল্লা')) headerMap['address'] = idx;
-    if (lower.includes('thana') || lower.includes('উপজেলা') || lower.includes('থানা')) headerMap['thana'] = idx;
-    if (lower.includes('ward') || lower.includes('ওয়ার্ড') || lower.includes('union') || lower.includes('ইউনিয়ন')) headerMap['ward'] = idx;
-    if (lower.includes('center') || lower.includes('কেন্দ্র') || lower.includes('ভোটকেন্দ্র')) headerMap['center'] = idx;
-    if (lower.includes('area_code') || lower.includes('এলাকা কোড')) headerMap['area_code'] = idx;
-    if (lower.includes('seat') || lower.includes('আসন')) headerMap['seat'] = idx;
-    if (lower.includes('district') || lower.includes('জেলা')) headerMap['district'] = idx;
+  headers.forEach((h, idx) => {
+    if (h.includes('name') || h.includes('নাম')) headerMap['name'] = idx;
+    if (h.includes('father') || h.includes('পিতা')) headerMap['father'] = idx;
+    if (h.includes('mother') || h.includes('মাতা')) headerMap['mother'] = idx;
+    if (h.includes('spouse') || h.includes('স্বামী') || h.includes('স্ত্রী')) headerMap['spouse'] = idx;
+    if (h.includes('nid') || h.includes('জাতীয়') || h.includes('smart')) headerMap['nid'] = idx;
+    if (h.includes('voter') || h.includes('ভোটার') || h.includes('pin')) headerMap['voter_no'] = idx;
+    if (h.includes('dob') || h.includes('জন্ম')) headerMap['dob'] = idx;
+    if (h.includes('seat') || h.includes('আসন')) headerMap['seat'] = idx;
   });
 
   const parsed: VoterRecord[] = [];
-
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(delimiter).map((c) => c.replace(/^["']|["']$/g, '').trim());
+    const cols = lines[i].split(/[,\t;]/).map((c) => c.replace(/^["']|["']$/g, '').trim());
     if (cols.length === 0 || !cols.some((c) => c.length > 0)) continue;
 
     const seat = (headerMap['seat'] !== undefined ? cols[headerMap['seat']] : '') || defaultSeat;
     const { district, division } = deduceDistrictAndDivision(seat, defaultDistrict);
 
-    const record: VoterRecord = {
-      id: `vtr-${seat}-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 4)}`,
-      serialNo: headerMap['serial'] !== undefined ? cols[headerMap['serial']] : `${i}`,
-      nameBn: (headerMap['name'] !== undefined ? cols[headerMap['name']] : cols[1] || cols[0]) || 'অজ্ঞাত নাম',
-      fatherName: (headerMap['father'] !== undefined ? cols[headerMap['father']] : cols[2]) || '',
-      motherName: (headerMap['mother'] !== undefined ? cols[headerMap['mother']] : cols[3]) || '',
+    parsed.push({
+      id: `vtr-${seat}-${Date.now()}-${i}`,
+      serialNo: `${i}`,
+      nameBn: headerMap['name'] !== undefined ? cols[headerMap['name']] : cols[0] || 'ভোটার',
+      fatherName: headerMap['father'] !== undefined ? cols[headerMap['father']] : '',
+      motherName: headerMap['mother'] !== undefined ? cols[headerMap['mother']] : '',
       spouseName: headerMap['spouse'] !== undefined ? cols[headerMap['spouse']] : '',
-      dob: (headerMap['dob'] !== undefined ? cols[headerMap['dob']] : cols[4]) || '',
-      nidNo: (headerMap['nid'] !== undefined ? cols[headerMap['nid']] : cols[5] || cols[0]) || `NID${Date.now()}${i}`,
-      voterNo: (headerMap['voter_no'] !== undefined ? cols[headerMap['voter_no']] : cols[6] || cols[0]) || `VTR${Date.now()}${i}`,
-      formNo: headerMap['form_no'] !== undefined ? cols[headerMap['form_no']] : '',
-      gender: headerMap['gender'] !== undefined ? cols[headerMap['gender']] : 'male',
-      bloodGroup: headerMap['blood'] !== undefined ? cols[headerMap['blood']] : '',
+      dob: headerMap['dob'] !== undefined ? bnToEnDigits(cols[headerMap['dob']]) : '',
+      nidNo: headerMap['nid'] !== undefined ? bnToEnDigits(cols[headerMap['nid']]) : '',
+      voterNo: headerMap['voter_no'] !== undefined ? bnToEnDigits(cols[headerMap['voter_no']]) : '',
+      gender: 'male',
       division,
       district,
       seatNo: seat,
       seatNameBn: seat,
-      upazilaThana: (headerMap['thana'] !== undefined ? cols[headerMap['thana']] : '') || district,
-      unionWard: headerMap['ward'] !== undefined ? cols[headerMap['ward']] : '',
-      villageArea: (headerMap['address'] !== undefined ? cols[headerMap['address']] : '') || 'উপজেলা এলাকা',
-      pollingCenter: (headerMap['center'] !== undefined ? cols[headerMap['center']] : '') || 'স্থানীয় ভোট কেন্দ্র',
-      voterAreaCode: headerMap['area_code'] !== undefined ? cols[headerMap['area_code']] : '',
+      upazilaThana: district,
+      unionWard: '',
+      villageArea: 'সদর এলাকা',
+      pollingCenter: 'ভোট কেন্দ্র',
       createdAt: new Date().toISOString().split('T')[0],
-    };
-
-    parsed.push(record);
+    });
   }
-
   return parsed;
 }
 
-// Smart JSON Parser
-export function parseVotersFromJson(jsonData: any, defaultDistrict = 'ঢাকা', defaultSeat = 'ঢাকা-১০'): VoterRecord[] {
+export function parseVotersFromJson(jsonData: any, defaultDistrict = 'সিরাজগঞ্জ', defaultSeat = 'সিরাজগঞ্জ-২'): VoterRecord[] {
   const list = Array.isArray(jsonData) ? jsonData : jsonData.voters || jsonData.data || [jsonData];
   const parsed: VoterRecord[] = [];
 
   list.forEach((item: any, idx: number) => {
     if (!item || typeof item !== 'object') return;
-
-    const seat = item.seatNo || item.seat || item.seat_no || item.সংসদীয়_আসন || defaultSeat;
+    const seat = item.seatNo || item.seat || defaultSeat;
     const { district, division } = deduceDistrictAndDivision(seat, item.district || defaultDistrict);
 
-    const record: VoterRecord = {
-      id: item.id || `vtr-${seat}-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
-      serialNo: item.serialNo || item.serial || item.sl || item.ক্রমিক_নং || `${idx + 1}`,
-      nameBn: item.nameBn || item.name || item.voterName || item.নাম || 'অজ্ঞাত নাম',
-      nameEn: item.nameEn || item.englishName || item.name_en || '',
-      fatherName: item.fatherName || item.father || item.fName || item.পিতার_নাম || '',
-      motherName: item.motherName || item.mother || item.mName || item.মাতার_নাম || '',
-      spouseName: item.spouseName || item.spouse || item.স্বামী_স্ত্রীর_নাম || '',
-      dob: item.dob || item.birthDate || item.dateOfBirth || item.জন্ম_তারিখ || '',
-      nidNo: String(item.nidNo || item.nid || item.nationalId || item.জাতীয়_পরিচয়পত্র_নং || `NID${Date.now()}${idx}`),
-      voterNo: String(item.voterNo || item.voter_no || item.voterId || item.ভোটার_নং || `VTR${Date.now()}${idx}`),
-      formNo: item.formNo || item.form_no || item.ফরম_নং || '',
-      gender: item.gender || item.লিঙ্গ || 'male',
-      bloodGroup: item.bloodGroup || item.blood_group || item.রক্তের_গ্রুপ || '',
-      occupation: item.occupation || item.পেশা || '',
-      division: item.division || item.বিভাগ || division,
-      district: item.district || item.জেলা || district,
+    parsed.push({
+      id: item.id || `vtr-${seat}-${Date.now()}-${idx}`,
+      serialNo: item.serialNo || `${idx + 1}`,
+      nameBn: item.nameBn || item.name || 'ভোটার',
+      nameEn: item.nameEn || '',
+      fatherName: item.fatherName || item.father || '',
+      motherName: item.motherName || item.mother || '',
+      spouseName: item.spouseName || item.spouse || '',
+      dob: bnToEnDigits(item.dob || ''),
+      nidNo: bnToEnDigits(item.nidNo || item.nid || ''),
+      voterNo: bnToEnDigits(item.voterNo || item.voter_no || ''),
+      gender: item.gender || 'male',
+      division,
+      district,
       seatNo: seat,
-      seatNameBn: item.seatNameBn || item.seat_name || seat,
-      upazilaThana: item.upazilaThana || item.upazila || item.thana || item.উপজেলা || item.থানা || district,
-      unionWard: item.unionWard || item.ward || item.union || item.ওয়ার্ড || item.ইউনিয়ন || '',
-      villageArea: item.villageArea || item.address || item.village || item.ঠিকানা || item.গ্রাম || 'সদর এলাকা',
-      pollingCenter: item.pollingCenter || item.center || item.ভোট_কেন্দ্র || 'ভোট কেন্দ্র',
-      voterAreaCode: item.voterAreaCode || item.areaCode || item.ভোটার_এলাকা_কোড || '',
-      voterAreaName: item.voterAreaName || item.areaName || '',
-      photoUrl: item.photoUrl || item.photo || '',
-      createdAt: item.createdAt || new Date().toISOString().split('T')[0],
-    };
-
-    parsed.push(record);
+      seatNameBn: seat,
+      upazilaThana: item.upazilaThana || district,
+      unionWard: item.unionWard || '',
+      villageArea: item.villageArea || '',
+      pollingCenter: item.pollingCenter || '',
+      createdAt: new Date().toISOString().split('T')[0],
+    });
   });
 
   return parsed;
 }
 
-// Unzip and Parse All Files in a ZIP Archive
-export async function parseVotersFromZip(
-  zipBuffer: ArrayBuffer,
-  onProgress?: (msg: string, percent: number) => void
-): Promise<{ totalImported: number; seats: string[]; filesCount: number }> {
-  const zip = new JSZip();
-  onProgress?.('জিপ ফাইল আনপ্যাক করা হচ্ছে...', 10);
-  const loadedZip = await zip.loadAsync(zipBuffer);
-
-  const files = Object.keys(loadedZip.files).filter((fileName) => !loadedZip.files[fileName].dir);
-  let totalImported = 0;
-  const seatsAffected = new Set<string>();
-
-  for (let i = 0; i < files.length; i++) {
-    const fileName = files[i];
-    const file = loadedZip.files[fileName];
-    const progressPercent = Math.round(20 + ((i + 1) / files.length) * 70);
-    onProgress?.(`ফাইল প্রসেস হচ্ছে (${i + 1}/${files.length}): ${fileName}`, progressPercent);
-
-    // Guess seat from filename (e.g., "Dhaka-10_Voters.json" or "Comilla-6.csv" or "বগুড়া-৬.txt")
-    let guessedSeat = 'ঢাকা-১০';
-    const baseName = fileName.replace(/\.[^/.]+$/, '').trim();
-    for (const d of BANGLADESH_DISTRICTS) {
-      for (const s of d.seats) {
-        if (fileName.includes(s) || baseName.includes(s) || fileName.toLowerCase().includes(s.toLowerCase())) {
-          guessedSeat = s;
-          break;
-        }
-      }
-    }
-
-    const { district } = deduceDistrictAndDivision(guessedSeat);
-
-    if (fileName.endsWith('.json')) {
-      const text = await file.async('text');
-      try {
-        const json = JSON.parse(text);
-        const records = parseVotersFromJson(json, district, guessedSeat);
-        if (records.length > 0) {
-          await bulkInsertVoters(records);
-          totalImported += records.length;
-          records.forEach((r) => seatsAffected.add(r.seatNo));
-        }
-      } catch (err) {
-        console.warn(`JSON parse error in ${fileName}:`, err);
-      }
-    } else if (fileName.endsWith('.csv') || fileName.endsWith('.txt') || fileName.endsWith('.tsv')) {
-      const text = await file.async('text');
-      const records = parseVotersFromCsv(text, district, guessedSeat);
-      if (records.length > 0) {
-        await bulkInsertVoters(records);
-        totalImported += records.length;
-        records.forEach((r) => seatsAffected.add(r.seatNo));
-      }
-    }
-  }
-
-  onProgress?.(`সম্পন্ন! মোট ${totalImported} টি রেকর্ড সফলভাবে ডাটাবেজে যুক্ত হয়েছে।`, 100);
-
-  return {
-    totalImported,
-    seats: Array.from(seatsAffected),
-    filesCount: files.length,
-  };
-}
-
 // ----------------- ADMIN SECURITY & PIN MANAGEMENT -----------------
-
 export function getAdminPin(): string {
   return localStorage.getItem(ADMIN_PIN_KEY) || DEFAULT_ADMIN_PIN;
 }
@@ -717,16 +623,4 @@ export function setAdminPin(newPin: string): boolean {
 export function verifyAdminPin(enteredPin: string): boolean {
   const currentPin = getAdminPin();
   return enteredPin.trim() === currentPin;
-}
-
-export function isSessionAdminUnlocked(): boolean {
-  return sessionStorage.getItem('voter_admin_unlocked') === 'true';
-}
-
-export function setSessionAdminUnlocked(unlocked: boolean): void {
-  if (unlocked) {
-    sessionStorage.setItem('voter_admin_unlocked', 'true');
-  } else {
-    sessionStorage.removeItem('voter_admin_unlocked');
-  }
 }
