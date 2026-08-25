@@ -29,7 +29,7 @@ import {
 
 interface HomePageProps {
   onSelectTool: (tool: ActiveTool) => void;
-  onOpenLoginModal: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenLoginModal: (tab?: 'shop_login' | 'admin_login' | 'profile' | 'register' | 'login') => void;
   onOpenVoterDbModal?: () => void;
 }
 
@@ -248,7 +248,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   <span>দোকানদার লগইন</span>
                 </button>
                 <button
-                  onClick={() => onOpenLoginModal('profile')}
+                  onClick={() => onOpenLoginModal('register')}
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95 cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4 text-white" />

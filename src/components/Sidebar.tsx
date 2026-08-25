@@ -22,7 +22,7 @@ import { useShopAuth } from '../context/ShopAuthContext';
 interface SidebarProps {
   activeTool: ActiveTool;
   setActiveTool: (tool: ActiveTool) => void;
-  onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile' | 'register' | 'login') => void;
   onOpenVoterDbModal?: () => void;
 }
 

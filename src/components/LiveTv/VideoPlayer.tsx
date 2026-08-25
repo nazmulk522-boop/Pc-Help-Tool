@@ -21,7 +21,10 @@ import {
   Ratio,
   Shield,
   Sparkles,
-  Cast
+  Cast,
+  RefreshCw,
+  Globe,
+  CheckCircle2
 } from 'lucide-react';
 import { IptvChannel } from '../../types';
 import { toggleFavoriteChannel } from '../../utils/iptvStorage';
@@ -63,6 +66,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [retryCount, setRetryCount] = useState<number>(0);
   const [isPiPSupported, setIsPiPSupported] = useState<boolean>(false);
   const [streamHealth, setStreamHealth] = useState<'Excellent' | 'Good' | 'Buffering'>('Good');
+  const [autoplayMutedNotice, setAutoplayMutedNotice] = useState<boolean>(false);
+
+  // Playback Mode: 'hls' | 'proxy' | 'backup' | 'embed'
+  const [playbackMode, setPlaybackMode] = useState<'hls' | 'proxy' | 'backup' | 'embed'>('hls');
+  const [activeBackupIndex, setActiveBackupIndex] = useState<number>(0);
 
   // Check PiP support
   useEffect(() => {
@@ -94,8 +102,24 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
+  // Determine current active stream URL
+  const getActiveStreamUrl = useCallback((): string => {
+    if (playbackMode === 'backup' && channel.backupUrls && channel.backupUrls.length > 0) {
+      return channel.backupUrls[activeBackupIndex] || channel.backupUrls[0];
+    }
+    return channel.streamUrl;
+  }, [channel, playbackMode, activeBackupIndex]);
+
   // Load and play HLS, MPEG-TS or native video
-  const loadStream = useCallback((streamUrl: string) => {
+  const loadStream = useCallback((mode: 'hls' | 'proxy' | 'backup' | 'embed' = 'hls') => {
+    if (mode === 'embed') {
+      setPlaybackMode('embed');
+      setIsLoading(false);
+      setError(null);
+      destroyPlayers();
+      return;
+    }
+
     const video = videoRef.current;
     if (!video) return;
 
@@ -104,14 +128,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     setStreamHealth('Buffering');
     destroyPlayers();
 
-    // Determine effective URL (check if proxy needed)
-    let urlToPlay = streamUrl;
-    if (streamUrl.startsWith('http://') && window.location.protocol === 'https:') {
-      // Mixed content issue fallback to stream proxy
-      urlToPlay = `/api/iptv/proxy-stream?url=${encodeURIComponent(streamUrl)}`;
+    let rawUrl = channel.streamUrl;
+    if (mode === 'backup' && channel.backupUrls && channel.backupUrls.length > 0) {
+      rawUrl = channel.backupUrls[activeBackupIndex] || channel.backupUrls[0];
     }
 
-    const isTsStream = streamUrl.endsWith('.ts') || (!streamUrl.endsWith('.m3u8') && !streamUrl.includes('.m3u8'));
+    // Determine effective URL
+    let urlToPlay = rawUrl;
+    const isMixedContent = rawUrl.startsWith('http://') && window.location.protocol === 'https:';
+
+    if (mode === 'proxy' || isMixedContent) {
+      urlToPlay = `/api/iptv/proxy-stream?url=${encodeURIComponent(rawUrl)}`;
+    }
+
+    const isTsStream = rawUrl.endsWith('.ts') || (!rawUrl.endsWith('.m3u8') && !rawUrl.includes('.m3u8') && !rawUrl.includes('manifest'));
 
     // 1. If TS stream, use mpegts.js
     if (isTsStream && mpegts.isSupported()) {
@@ -139,6 +169,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             (playPromise as Promise<void>).catch(() => {
               video.muted = true;
               setIsMuted(true);
+              setAutoplayMutedNotice(true);
               const retryPromise = player.play();
               if (retryPromise && typeof (retryPromise as any).catch === 'function') {
                 (retryPromise as Promise<void>).catch(() => {});
@@ -178,7 +209,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           video.play().catch(() => {
             video.muted = true;
             setIsMuted(true);
-            video.play().catch((e) => console.warn('Autoplay failed:', e));
+            setAutoplayMutedNotice(true);
+            video.play().catch((e) => console.warn('Autoplay muted failed:', e));
           });
         }
       });
@@ -187,19 +219,27 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              console.warn('HLS Network Error, attempting recovery...', data);
+              console.warn('HLS Network Error, switching playback strategy...', data);
               setStreamHealth('Buffering');
-              if (retryCount < 2) {
-                hls.startLoad();
-                setRetryCount((prev) => prev + 1);
+
+              if (mode === 'hls' && !urlToPlay.includes('/api/iptv/proxy-stream')) {
+                // Try through Proxy
+                console.log('Switching to Proxy stream...');
+                setPlaybackMode('proxy');
+                loadStream('proxy');
+              } else if (channel.backupUrls && channel.backupUrls.length > 0 && mode !== 'backup') {
+                // Try Backup URL
+                console.log('Switching to Backup stream...');
+                setPlaybackMode('backup');
+                loadStream('backup');
+              } else if (channel.embedUrl) {
+                // Try Embed Mode
+                console.log('Switching to Embed feed...');
+                setPlaybackMode('embed');
+                setIsLoading(false);
               } else {
-                if (!urlToPlay.includes('/api/iptv/proxy-stream')) {
-                  const proxyUrl = `/api/iptv/proxy-stream?url=${encodeURIComponent(streamUrl)}`;
-                  hls.loadSource(proxyUrl);
-                } else {
-                  setError('লাইভ স্ট্রিম সংযোগ করা সম্ভব হয়নি। স্ট্রিমটি অফলাইন অথবা সার্ভার ব্লক করেছে।');
-                  setIsLoading(false);
-                }
+                setError('লাইভ স্ট্রিম সংযোগ করা সম্ভব হয়নি। স্ট্রিমটি অফলাইন অথবা সার্ভার ব্লক করেছে।');
+                setIsLoading(false);
               }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
@@ -208,8 +248,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               break;
             default:
               hls.destroy();
-              setError('প্লেয়ার এরর: স্ট্রিম লোড করা যায়নি।');
-              setIsLoading(false);
+              if (channel.embedUrl) {
+                setPlaybackMode('embed');
+                setIsLoading(false);
+              } else {
+                setError('প্লেয়ার এরর: স্ট্রিম লোড করা যায়নি।');
+                setIsLoading(false);
+              }
               break;
           }
         }
@@ -224,30 +269,45 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           video.play().catch(() => {
             video.muted = true;
             setIsMuted(true);
+            setAutoplayMutedNotice(true);
             video.play().catch(() => {});
           });
         }
       });
       video.addEventListener('error', () => {
-        setError('স্ট্রিম প্লে করা যায়নি।');
-        setIsLoading(false);
+        if (mode === 'hls') {
+          setPlaybackMode('proxy');
+          loadStream('proxy');
+        } else if (channel.embedUrl) {
+          setPlaybackMode('embed');
+        } else {
+          setError('স্ট্রিম প্লে করা যায়নি।');
+          setIsLoading(false);
+        }
       });
     } else {
       video.src = urlToPlay;
     }
-  }, [autoPlay, retryCount]);
+  }, [channel, autoPlay, activeBackupIndex]);
 
   // Load stream when channel changes
   useEffect(() => {
-    if (channel && channel.streamUrl) {
+    if (channel) {
       setRetryCount(0);
-      loadStream(channel.streamUrl);
+      setAutoplayMutedNotice(false);
+      if (channel.streamType === 'embed' && channel.embedUrl) {
+        setPlaybackMode('embed');
+        setIsLoading(false);
+      } else {
+        setPlaybackMode('hls');
+        loadStream('hls');
+      }
     }
 
     return () => {
       destroyPlayers();
     };
-  }, [channel, loadStream]);
+  }, [channel]);
 
   // Auto-hide controls timer
   const handleUserActivity = () => {
@@ -259,7 +319,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       if (isPlaying) {
         setShowControls(false);
       }
-    }, 4000);
+    }, 4500);
   };
 
   useEffect(() => {
@@ -273,7 +333,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in input
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
         return;
       }
@@ -317,6 +376,21 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (!video) return;
     video.muted = !video.muted;
     setIsMuted(video.muted);
+    if (!video.muted) {
+      setAutoplayMutedNotice(false);
+    }
+  };
+
+  const handleUnmuteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (video) {
+      video.muted = false;
+      video.volume = 1;
+      setIsMuted(false);
+      setVolume(1);
+    }
+    setAutoplayMutedNotice(false);
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -326,6 +400,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       videoRef.current.volume = val;
       videoRef.current.muted = val === 0;
       setIsMuted(val === 0);
+      if (val > 0) {
+        setAutoplayMutedNotice(false);
+      }
     }
   };
 
@@ -394,22 +471,48 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         isFullscreen ? 'fixed inset-0 z-50 rounded-none w-screen h-screen' : 'w-full aspect-video min-h-[260px] sm:min-h-[420px]'
       }`}
     >
-      {/* Video Element */}
-      <video
-        ref={videoRef}
-        playsInline
-        className={`w-full h-full bg-black transition-all ${getAspectClass()}`}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onWaiting={() => setIsLoading(true)}
-        onPlaying={() => {
-          setIsLoading(false);
-          setStreamHealth('Excellent');
-        }}
-      />
+      {/* 1. Embed Iframe Mode (YouTube Live / Web Feed) */}
+      {playbackMode === 'embed' && channel.embedUrl ? (
+        <div className="w-full h-full bg-black flex items-center justify-center relative">
+          <iframe
+            src={channel.embedUrl}
+            title={channel.name}
+            className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        </div>
+      ) : (
+        /* 2. Native / HLS / TS HTML5 Video Player */
+        <video
+          ref={videoRef}
+          playsInline
+          className={`w-full h-full bg-black transition-all ${getAspectClass()}`}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onWaiting={() => setIsLoading(true)}
+          onPlaying={() => {
+            setIsLoading(false);
+            setStreamHealth('Excellent');
+          }}
+        />
+      )}
+
+      {/* Autoplay Muted Notice Overlay Banner */}
+      {autoplayMutedNotice && !error && (
+        <div className="absolute top-20 z-30 animate-bounce">
+          <button
+            onClick={handleUnmuteClick}
+            className="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white rounded-full font-bold text-xs shadow-xl flex items-center gap-2 border border-white/20 cursor-pointer"
+          >
+            <VolumeX className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>সাউন্ড শুনতে এখানে ক্লিক করুন (Unmute)</span>
+          </button>
+        </div>
+      )}
 
       {/* Loading Spinner */}
-      {isLoading && !error && (
+      {isLoading && !error && playbackMode !== 'embed' && (
         <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/60 backdrop-blur-xs space-y-3 pointer-events-none animate-in fade-in">
           <div className="relative">
             <div className="w-14 h-14 rounded-2xl border-4 border-cyan-500/20 border-t-cyan-400 animate-spin" />
@@ -420,15 +523,15 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               {channel.name}
             </span>
             <span className="text-[11px] text-cyan-300 block font-mono">
-              কানেক্ট হচ্ছে... (Live Stream Buffer)
+              {playbackMode === 'proxy' ? 'প্রক্সি সার্ভার দিয়ে কানেক্ট হচ্ছে...' : 'কানেক্ট হচ্ছে... (Live Stream Buffer)'}
             </span>
           </div>
         </div>
       )}
 
-      {/* Error Overlay */}
+      {/* Error Overlay with Multi-Option Recovery */}
       {error && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/90 p-6 text-center space-y-4">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/95 p-6 text-center space-y-4">
           <div className="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
             <AlertCircle className="w-6 h-6" />
           </div>
@@ -436,21 +539,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
             <h4 className="text-sm font-bold text-white">লাইভ স্ট্রিম চালু হতে পারেনি</h4>
             <p className="text-xs text-slate-400 leading-relaxed">{error}</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <button
               onClick={() => {
                 setError(null);
-                loadStream(channel.streamUrl);
+                setPlaybackMode('proxy');
+                loadStream('proxy');
               }}
-              className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-cyan-950"
+              className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-cyan-950"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>পুনরায় চেষ্টা করুন</span>
+              <span>প্রক্সি দিয়ে চালান</span>
             </button>
+
+            {channel.backupUrls && channel.backupUrls.length > 0 && (
+              <button
+                onClick={() => {
+                  setError(null);
+                  setPlaybackMode('backup');
+                  loadStream('backup');
+                }}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-emerald-950"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>ব্যাকআপ সার্ভার</span>
+              </button>
+            )}
+
+            {channel.embedUrl && (
+              <button
+                onClick={() => {
+                  setError(null);
+                  setPlaybackMode('embed');
+                }}
+                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-rose-950"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>অফিশিয়াল লাইভ ফিড</span>
+              </button>
+            )}
+
             {onNextChannel && (
               <button
                 onClick={onNextChannel}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition"
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition"
               >
                 পরবর্তী চ্যানেল
               </button>
@@ -508,6 +640,29 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
         {/* Top Right Quick Actions */}
         <div className="flex items-center gap-2 shrink-0">
+          {/* Stream Mode Switcher */}
+          {channel.embedUrl && (
+            <button
+              onClick={() => {
+                if (playbackMode === 'embed') {
+                  setPlaybackMode('hls');
+                  loadStream('hls');
+                } else {
+                  setPlaybackMode('embed');
+                }
+              }}
+              className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold backdrop-blur-md transition flex items-center gap-1 ${
+                playbackMode === 'embed'
+                  ? 'bg-rose-600/30 border-rose-500 text-rose-300'
+                  : 'bg-black/40 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title="অফিশিয়াল লাইভ ফিড ও HLS মোড পরিবর্তন করুন"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>{playbackMode === 'embed' ? 'HLS মোড' : 'লাইভ ফিড'}</span>
+            </button>
+          )}
+
           <button
             onClick={handleFavClick}
             className={`p-2 rounded-xl border backdrop-blur-md transition ${
@@ -532,111 +687,134 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       </div>
 
       {/* Bottom Ultra XC Player Controls Bar Overlay */}
-      <div
-        className={`absolute bottom-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-t from-black/95 via-black/70 to-transparent transition-opacity duration-300 z-10 space-y-2 pointer-events-auto ${
-          showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
-      >
-        {/* Next program indicator */}
-        <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 font-mono">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span>স্ট্রিম স্ট্যাটাস: <strong className="text-emerald-300 font-normal">{streamHealth}</strong></span>
-          </div>
-          {channel.nextProgram && (
-            <div className="hidden sm:block text-slate-400 truncate">
-              পরবর্তী: <span className="text-slate-300">{channel.nextProgram}</span>
+      {playbackMode !== 'embed' && (
+        <div
+          className={`absolute bottom-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-t from-black/95 via-black/70 to-transparent transition-opacity duration-300 z-10 space-y-2 pointer-events-auto ${
+            showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          {/* Status and Source Info */}
+          <div className="flex items-center justify-between text-[11px] text-slate-400 px-1 font-mono">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>স্ট্যাটাস: <strong className="text-emerald-300 font-normal">{streamHealth}</strong></span>
+              <span className="text-slate-600">|</span>
+              <span className="text-cyan-400 font-normal">
+                {playbackMode === 'proxy' ? 'Proxy Mode' : playbackMode === 'backup' ? 'Backup Mirror' : 'Direct HLS'}
+              </span>
             </div>
-          )}
-        </div>
-
-        {/* Main Controls Row */}
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
-          {/* Left Controls: Prev, Play/Pause, Next, Volume */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            {onPrevChannel && (
-              <button
-                onClick={onPrevChannel}
-                className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60 transition"
-                title="পূর্ববর্তী চ্যানেল (Down Arrow)"
-              >
-                <SkipBack className="w-4 h-4" />
-              </button>
+            {channel.nextProgram && (
+              <div className="hidden sm:block text-slate-400 truncate">
+                পরবর্তী: <span className="text-slate-300">{channel.nextProgram}</span>
+              </div>
             )}
-
-            <button
-              onClick={togglePlay}
-              className="p-2.5 sm:p-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black shadow-lg shadow-cyan-500/20 transition active:scale-95"
-              title={isPlaying ? 'পজ (Space)' : 'প্লে (Space)'}
-            >
-              {isPlaying ? <Pause className="w-5 h-5 fill-slate-950" /> : <Play className="w-5 h-5 fill-slate-950 ml-0.5" />}
-            </button>
-
-            {onNextChannel && (
-              <button
-                onClick={onNextChannel}
-                className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60 transition"
-                title="পরবর্তী চ্যানেল (Up Arrow)"
-              >
-                <SkipForward className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Volume Control */}
-            <div className="flex items-center gap-1.5 ml-2">
-              <button
-                onClick={toggleMute}
-                className="p-2 rounded-xl text-slate-300 hover:text-white transition"
-                title="মিউট / আনমিউট (M)"
-              >
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-rose-400" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={isMuted ? 0 : volume}
-                onChange={handleVolumeChange}
-                className="w-16 sm:w-24 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
-              />
-            </div>
           </div>
 
-          {/* Right Controls: Reload, PiP, Fullscreen */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            <button
-              onClick={() => loadStream(channel.streamUrl)}
-              className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 transition"
-              title="স্ট্রিম রিলোড / রিকানেক্ট"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </button>
+          {/* Main Controls Row */}
+          <div className="flex items-center justify-between gap-2 sm:gap-4">
+            {/* Left Controls: Prev, Play/Pause, Next, Volume */}
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              {onPrevChannel && (
+                <button
+                  onClick={onPrevChannel}
+                  className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60 transition"
+                  title="পূর্ববর্তী চ্যানেল (Down Arrow)"
+                >
+                  <SkipBack className="w-4 h-4" />
+                </button>
+              )}
 
-            {isPiPSupported && (
               <button
-                onClick={togglePictureInPicture}
+                onClick={togglePlay}
+                className="p-2.5 sm:p-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black shadow-lg shadow-cyan-500/20 transition active:scale-95 cursor-pointer"
+                title={isPlaying ? 'পজ (Space)' : 'প্লে (Space)'}
+              >
+                {isPlaying ? <Pause className="w-5 h-5 fill-slate-950" /> : <Play className="w-5 h-5 fill-slate-950 ml-0.5" />}
+              </button>
+
+              {onNextChannel && (
+                <button
+                  onClick={onNextChannel}
+                  className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-700/60 transition"
+                  title="পরবর্তী চ্যানেল (Up Arrow)"
+                >
+                  <SkipForward className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Volume Control */}
+              <div className="flex items-center gap-1.5 ml-2">
+                <button
+                  onClick={toggleMute}
+                  className="p-2 rounded-xl text-slate-300 hover:text-white transition cursor-pointer"
+                  title="মিউট / আনমিউট (M)"
+                >
+                  {isMuted || volume === 0 ? (
+                    <VolumeX className="w-4 h-4 text-rose-400" />
+                  ) : (
+                    <Volume2 className="w-4 h-4" />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className="w-16 sm:w-24 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                />
+              </div>
+            </div>
+
+            {/* Right Controls: Proxy Switch, Reload, PiP, Fullscreen */}
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button
+                onClick={() => {
+                  const nextMode = playbackMode === 'hls' ? 'proxy' : 'hls';
+                  setPlaybackMode(nextMode);
+                  loadStream(nextMode);
+                }}
+                className={`p-2 rounded-xl border text-xs font-bold transition flex items-center gap-1 ${
+                  playbackMode === 'proxy'
+                    ? 'bg-cyan-600/30 border-cyan-500 text-cyan-300'
+                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/60'
+                }`}
+                title="প্রক্সি মোড অন/অফ করুন"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline text-[10px]">{playbackMode === 'proxy' ? 'Proxy ON' : 'Proxy'}</span>
+              </button>
+
+              <button
+                onClick={() => loadStream(playbackMode)}
                 className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 transition"
-                title="Picture-in-Picture (ফ্লোটিং উইন্ডো)"
+                title="স্ট্রিম রিলোড / রিকানেক্ট"
               >
-                <ExternalLink className="w-4 h-4" />
+                <RotateCcw className="w-4 h-4" />
               </button>
-            )}
 
-            <button
-              onClick={toggleFullscreen}
-              className="p-2 sm:p-2.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-600/40 transition active:scale-95"
-              title="ফুলস্ক্রিন (F)"
-            >
-              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-            </button>
+              {isPiPSupported && (
+                <button
+                  onClick={togglePictureInPicture}
+                  className="p-2 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/60 transition"
+                  title="Picture-in-Picture (ফ্লোটিং উইন্ডো)"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </button>
+              )}
+
+              <button
+                onClick={toggleFullscreen}
+                className="p-2 sm:p-2.5 rounded-2xl bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 border border-cyan-600/40 transition active:scale-95 cursor-pointer"
+                title="ফুলস্ক্রিন (F)"
+              >
+                {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -24,22 +24,14 @@ function MainApp() {
 
   // Login / Profile Modal State
   const [loginModalOpen, setLoginModalOpen] = useState(false);
-  const [loginModalTab, setLoginModalTab] = useState<'shop_login' | 'admin_login' | 'profile'>('shop_login');
+  const [loginModalTab, setLoginModalTab] = useState<'login' | 'register' | 'admin_login' | 'profile' | 'shop_login'>('login');
 
   // Voter Database Upload Admin Modal State
   const [voterDbModalOpen, setVoterDbModalOpen] = useState(false);
 
-  const { currentProfile, isSuperAdmin, ipMismatchError, isLoggedIn, isLoadingAuth } = useShopAuth();
+  const { currentProfile, isSuperAdmin, isLoggedIn, isLoadingAuth } = useShopAuth();
 
-  // If IP mismatch occurred, open the login modal automatically with warning
-  React.useEffect(() => {
-    if (ipMismatchError) {
-      setLoginModalTab('shop_login');
-      setLoginModalOpen(true);
-    }
-  }, [ipMismatchError]);
-
-  const handleOpenLoginModal = (tab: 'shop_login' | 'admin_login' | 'profile' = 'shop_login') => {
+  const handleOpenLoginModal = (tab: 'login' | 'register' | 'admin_login' | 'profile' | 'shop_login' = 'login') => {
     setLoginModalTab(tab);
     setLoginModalOpen(true);
   };

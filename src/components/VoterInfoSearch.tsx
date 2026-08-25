@@ -41,7 +41,7 @@ import { AdminVoterDbModal } from './AdminVoterDbModal';
 import { useShopAuth } from '../context/ShopAuthContext';
 
 interface VoterInfoSearchProps {
-  onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenLoginModal?: (tab?: 'shop_login' | 'admin_login' | 'profile' | 'register' | 'login') => void;
 }
 
 export const VoterInfoSearch: React.FC<VoterInfoSearchProps> = ({ onOpenLoginModal }) => {

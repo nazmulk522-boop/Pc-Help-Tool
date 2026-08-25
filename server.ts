@@ -274,10 +274,10 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-// 4. Verify Session (Checks Token & IP Match)
+// 4. Verify Session (Checks Token Validity)
 app.post('/api/auth/verify-session', (req, res) => {
   try {
-    const { token, email } = req.body;
+    const { token } = req.body;
     const currentIp = getClientIp(req);
 
     if (!token) {
@@ -296,19 +296,6 @@ app.post('/api/auth/verify-session', (req, res) => {
         reason: 'session_expired',
         currentIp,
         message: 'লগইন সেশনের মেয়াদ শেষ হয়েছে। পুনরায় লগইন করুন।',
-      });
-    }
-
-    // Check IP match: Same IP remains logged in; changed IP asks for login!
-    if (session.ip !== currentIp) {
-      // IP changed! Force re-login for security
-      sessionsMap.delete(token);
-      return res.json({
-        valid: false,
-        reason: 'ip_changed',
-        currentIp,
-        sessionIp: session.ip,
-        message: `আপনার আইপি পরিবর্তিত হয়েছে (${session.ip} ➔ ${currentIp})। নিরাপত্তার জন্য পুনরায় লগইন করুন।`,
       });
     }
 
@@ -819,22 +806,32 @@ app.post('/api/iptv/fetch-m3u', async (req, res) => {
 });
 
 // 4. Stream Proxy (for HLS / TS live streams to bypass CORS and Mixed-Content)
+app.options('/api/iptv/proxy-stream', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  return res.sendStatus(204);
+});
+
 app.get('/api/iptv/proxy-stream', async (req, res) => {
   try {
-    const streamUrl = req.query.url as string;
-    if (!streamUrl) {
+    const rawUrl = req.query.url as string;
+    if (!rawUrl) {
       return res.status(400).send('Stream URL is required');
     }
 
+    const streamUrl = rawUrl.trim();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
 
     const response = await fetch(streamUrl, {
       signal: controller.signal,
       headers: {
         'User-Agent': IPTV_USER_AGENT,
         Accept: '*/*',
+        Connection: 'keep-alive',
       },
+      redirect: 'follow',
     });
     clearTimeout(timeoutId);
 
@@ -842,32 +839,66 @@ app.get('/api/iptv/proxy-stream', async (req, res) => {
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
 
-    const contentType = response.headers.get('content-type') || 'video/mp2t';
-    res.setHeader('Content-Type', contentType);
-
-    // If it's an HLS manifest, rewrite relative segment paths
-    if (contentType.includes('mpegurl') || streamUrl.endsWith('.m3u8')) {
-      const manifestText = await response.text();
-      const lines = manifestText.split('\n');
-      const rewritten = lines.map((line) => {
-        const trimmed = line.trim();
-        if (trimmed && !trimmed.startsWith('#')) {
-          try {
-            const absoluteChunkUrl = new URL(trimmed, streamUrl).href;
-            return `/api/iptv/proxy-stream?url=${encodeURIComponent(absoluteChunkUrl)}`;
-          } catch (e) {
-            return line;
-          }
-        }
-        return line;
-      }).join('\n');
-
-      return res.send(rewritten);
+    if (!response.ok) {
+      return res.status(response.status).send(`Stream fetch returned status ${response.status}`);
     }
 
-    // Binary / TS stream piping
+    const finalUrl = response.url || streamUrl;
+    const contentType = response.headers.get('content-type') || '';
+
+    // Check if it's an HLS manifest by content-type or extension or header
+    const isLikelyManifest =
+      contentType.includes('mpegurl') ||
+      contentType.includes('application/x-mpegurl') ||
+      contentType.includes('application/vnd.apple.mpegurl') ||
+      streamUrl.includes('.m3u8') ||
+      finalUrl.includes('.m3u8');
+
+    if (isLikelyManifest) {
+      const manifestText = await response.text();
+      // Verify if it's indeed an m3u8 playlist
+      if (manifestText.includes('#EXTM3U') || manifestText.includes('#EXTINF') || isLikelyManifest) {
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        const lines = manifestText.split(/\r?\n/);
+        const rewritten = lines
+          .map((line) => {
+            const trimmed = line.trim();
+            if (!trimmed) return line;
+
+            // Handle #EXT-X-KEY or #EXT-X-MEDIA with URI="..."
+            if (trimmed.startsWith('#EXT-X-KEY') || trimmed.startsWith('#EXT-X-MEDIA')) {
+              return trimmed.replace(/URI="([^"]+)"/g, (match, p1) => {
+                try {
+                  const absoluteUri = new URL(p1, finalUrl).href;
+                  return `URI="/api/iptv/proxy-stream?url=${encodeURIComponent(absoluteUri)}"`;
+                } catch (e) {
+                  return match;
+                }
+              });
+            }
+
+            // Rewrite segment / chunklist URLs
+            if (!trimmed.startsWith('#')) {
+              try {
+                const absoluteChunkUrl = new URL(trimmed, finalUrl).href;
+                return `/api/iptv/proxy-stream?url=${encodeURIComponent(absoluteChunkUrl)}`;
+              } catch (e) {
+                return line;
+              }
+            }
+            return line;
+          })
+          .join('\n');
+
+        return res.send(rewritten);
+      }
+    }
+
+    // Binary / TS / MP4 stream piping
+    res.setHeader('Content-Type', contentType || 'video/mp2t');
+
     if (!response.body) {
-      return res.status(500).send('No stream body');
+      return res.status(500).send('No stream body received');
     }
 
     const reader = response.body.getReader();

@@ -409,7 +409,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
             </span>
           </div>
           <span className="hidden sm:inline text-slate-500">
-            🔒 একই ডিভাইসে/আইপিতে লগইন স্বয়ংক্রিয়ভাবে সংরক্ষিত থাকে
+            🔓 নতুন ট্যাবে গেস্ট মোড চালু থাকে — যেকোনো সময় লগইন বা রেজিস্ট্রেশন করতে পারেন
           </span>
         </div>
 
@@ -429,7 +429,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                 }`}
               >
                 <LogIn className="w-4 h-4" />
-                <span>দোকানদার লগইন (Login)</span>
+                <span>লগইন (Login)</span>
               </button>
               <button
                 onClick={() => {
@@ -443,20 +443,22 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                 }`}
               >
                 <UserPlus className="w-4 h-4 text-emerald-600" />
-                <span>নতুন দোকান রেজিস্ট্রেশন (Register)</span>
+                <span>নতুন রেজিস্ট্রেশন (Register)</span>
               </button>
-              {activeTab === 'admin_login' && (
-                <button
-                  onClick={() => {
-                    setActiveTab('admin_login');
-                    setStatusMessage(null);
-                  }}
-                  className="pb-2.5 px-3 border-b-2 border-amber-600 text-amber-600 font-bold bg-white rounded-t-lg shadow-2xs flex items-center gap-1.5 transition cursor-pointer shrink-0"
-                >
-                  <ShieldCheck className="w-4 h-4 text-amber-500" />
-                  <span>এডমিন লগইন</span>
-                </button>
-              )}
+              <button
+                onClick={() => {
+                  setActiveTab('admin_login');
+                  setStatusMessage(null);
+                }}
+                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                  activeTab === 'admin_login'
+                    ? 'border-amber-600 text-amber-600 font-bold bg-white rounded-t-lg shadow-2xs'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4 text-amber-500" />
+                <span>এডমিন লগইন (Admin)</span>
+              </button>
             </>
           ) : (
             <>
@@ -496,23 +498,6 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
 
         {/* Modal Body Content */}
         <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
-          {/* IP Mismatch Warning Alert */}
-          {ipMismatchError && (
-            <div className="p-3 bg-amber-50 border-2 border-amber-400 rounded-xl flex items-start gap-2.5 text-xs text-amber-950 font-medium animate-in fade-in">
-              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="font-bold text-amber-900">আইপি (IP) পরিবর্তন সংক্রান্ত নোটিশ:</p>
-                <p className="text-[11px] leading-relaxed text-amber-900">{ipMismatchError}</p>
-                <button
-                  onClick={clearIpMismatchError}
-                  className="text-[10px] text-amber-700 underline font-semibold mt-1"
-                >
-                  নোটিশ বন্ধ করুন
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Status Message Notification */}
           {statusMessage && (
             <div
@@ -540,7 +525,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                   <span>ইমেইল ও পাসওয়ার্ড দিয়ে লগইন:</span>
                 </p>
                 <p className="text-[11px] text-blue-900 leading-relaxed">
-                  রেজিস্ট্রেশন করার সময় দেওয়া ইমেইল এবং পাসওয়ার্ড লিখুন। একই ডিভাইসে/আইপিতে থাকলে পরবর্তীতে অটো লগইন থাকবে।
+                  আপনার রেজিস্টার্ড ইমেইল ও পাসওয়ার্ড লিখুন। দোকানদার বা সুপার এডমিন উভয়েই এখান থেকে সহজে লগইন করতে পারবেন।
                 </p>
               </div>
 

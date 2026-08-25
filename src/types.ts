@@ -215,13 +215,15 @@ export interface IptvChannel {
   id: string;
   num?: number;
   name: string;
-  streamType?: 'live' | 'movie' | 'series';
+  streamType?: 'live' | 'movie' | 'series' | 'embed';
   streamId?: string | number;
   streamIcon?: string;
   epgChannelId?: string;
   categoryId?: string;
   categoryName?: string;
   streamUrl: string;
+  backupUrls?: string[];
+  embedUrl?: string;
   isFavorite?: boolean;
   resolution?: string; // 'HD', 'FHD', '4K', 'SD'
   currentProgram?: string;

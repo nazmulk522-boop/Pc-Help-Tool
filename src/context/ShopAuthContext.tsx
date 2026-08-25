@@ -53,14 +53,14 @@ interface ShopAuthContextType {
 
 const ShopAuthContext = createContext<ShopAuthContextType | undefined>(undefined);
 
-const STORAGE_TOKEN_KEY = 'shop_auth_token_v4';
-const STORAGE_PROFILE_KEY = 'shop_auth_profile_v4';
+const STORAGE_TOKEN_KEY = 'shop_auth_tab_token_v5';
+const STORAGE_PROFILE_KEY = 'shop_auth_tab_profile_v5';
 
 export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentProfile, setCurrentProfile] = useState<ShopProfile>(GUEST_PROFILE);
   const [sessionToken, setSessionToken] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(STORAGE_TOKEN_KEY) || null;
+      return sessionStorage.getItem(STORAGE_TOKEN_KEY) || null;
     }
     return null;
   });
@@ -69,9 +69,9 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [ipMismatchError, setIpMismatchError] = useState<string | null>(null);
   const [registeredShops, setRegisteredShops] = useState<ShopProfile[]>([]);
 
-  // 1. Verify Session & Bind to IP
+  // 1. Verify Session for the current active tab
   const verifyCurrentSession = useCallback(async (): Promise<boolean> => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_TOKEN_KEY) : null;
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem(STORAGE_TOKEN_KEY) : null;
     if (!token) {
       setCurrentProfile(GUEST_PROFILE);
       setIsLoadingAuth(false);
@@ -97,15 +97,10 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setIsLoadingAuth(false);
         return true;
       } else {
-        // IP Changed or session expired!
-        if (json.reason === 'ip_changed') {
-          setIpMismatchError(
-            `আপনার আইপি অ্যাড্রেস পরিবর্তিত হয়েছে (${json.sessionIp || 'পূর্বের'} ➔ ${json.currentIp || 'বর্তমান'})। নিরাপত্তার স্বার্থে পুনরায় লগইন করুন।`
-          );
-        }
+        // Session invalid or expired in server
         if (typeof window !== 'undefined') {
-          localStorage.removeItem(STORAGE_TOKEN_KEY);
-          localStorage.removeItem(STORAGE_PROFILE_KEY);
+          sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+          sessionStorage.removeItem(STORAGE_PROFILE_KEY);
         }
         setSessionToken(null);
         setCurrentProfile(GUEST_PROFILE);
@@ -164,8 +159,8 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const json = await res.json();
       if (json.success && json.token && json.profile) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem(STORAGE_TOKEN_KEY, json.token);
-          localStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(json.profile));
+          sessionStorage.setItem(STORAGE_TOKEN_KEY, json.token);
+          sessionStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(json.profile));
         }
         setSessionToken(json.token);
         setCurrentProfile(json.profile);
@@ -191,8 +186,8 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const json = await res.json();
       if (json.success && json.token && json.profile) {
         if (typeof window !== 'undefined') {
-          localStorage.setItem(STORAGE_TOKEN_KEY, json.token);
-          localStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(json.profile));
+          sessionStorage.setItem(STORAGE_TOKEN_KEY, json.token);
+          sessionStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(json.profile));
         }
         setSessionToken(json.token);
         setCurrentProfile(json.profile);
@@ -230,7 +225,7 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (json.success && json.profile) {
         setCurrentProfile(json.profile);
         if (typeof window !== 'undefined') {
-          localStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(json.profile));
+          sessionStorage.setItem(STORAGE_PROFILE_KEY, JSON.stringify(json.profile));
         }
         return true;
       }
@@ -272,8 +267,8 @@ export const ShopAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } catch (e) {}
 
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(STORAGE_TOKEN_KEY);
-      localStorage.removeItem(STORAGE_PROFILE_KEY);
+      sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+      sessionStorage.removeItem(STORAGE_PROFILE_KEY);
     }
     setSessionToken(null);
     setCurrentProfile(GUEST_PROFILE);

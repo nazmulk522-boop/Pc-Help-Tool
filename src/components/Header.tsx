@@ -19,7 +19,7 @@ interface HeaderProps {
   setActiveTool: (tool: ActiveTool) => void;
   onResetTask?: () => void;
   onToggleMobileSidebar?: () => void;
-  onOpenLoginModal: (tab?: 'shop_login' | 'admin_login' | 'profile') => void;
+  onOpenLoginModal: (tab?: 'shop_login' | 'admin_login' | 'profile' | 'register' | 'login') => void;
   onOpenVoterDbModal?: () => void;
 }
 
@@ -169,7 +169,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => onOpenLoginModal('profile')}
+              onClick={() => onOpenLoginModal('register')}
               className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
               title="নতুন রেজিস্ট্রেশন"
             >
