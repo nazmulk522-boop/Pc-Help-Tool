@@ -139,7 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
         {isLoggedIn ? (
           <button
             onClick={() => onOpenLoginModal('profile')}
-            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-800 text-xs font-bold transition shadow-2xs max-w-[200px] sm:max-w-xs"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200/80 border border-slate-200 text-slate-800 text-xs font-bold transition shadow-2xs max-w-[200px] sm:max-w-xs cursor-pointer"
             title="দোকানের নাম ও তথ্য পরিবর্তন করুন"
           >
             <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-white shrink-0 ${
@@ -161,19 +161,20 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => onOpenLoginModal('shop_login')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition active:scale-95"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+              title="দোকানদার লগইন"
             >
               <Store className="w-3.5 h-3.5" />
-              <span>দোকান লগইন</span>
+              <span>লগইন</span>
             </button>
 
             <button
-              onClick={() => onOpenLoginModal('admin_login')}
-              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold transition"
-              title="এডমিন লগইন"
+              onClick={() => onOpenLoginModal('profile')}
+              className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+              title="নতুন রেজিস্ট্রেশন"
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
-              <span>এডমিন</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>রেজিস্ট্রেশন</span>
             </button>
           </div>
         )}

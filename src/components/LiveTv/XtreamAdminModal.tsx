@@ -49,9 +49,9 @@ export const XtreamAdminModal: React.FC<XtreamAdminModalProps> = ({
   const [activeTab, setActiveTab] = useState<'xtream' | 'm3u_url' | 'm3u_text' | 'm3u_file' | 'accounts'>('xtream');
 
   // Xtream Form State
-  const [serverUrl, setServerUrl] = useState<string>('');
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
+  const [serverUrl, setServerUrl] = useState<string>('http://rgkkw.live:80');
+  const [username, setUsername] = useState<string>('1Aoen7elp5');
+  const [password, setPassword] = useState<string>('IgMJ60tmAa');
   
   // M3U URL Form State
   const [m3uUrl, setM3uUrl] = useState<string>('');

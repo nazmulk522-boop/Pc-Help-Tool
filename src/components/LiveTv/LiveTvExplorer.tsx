@@ -21,6 +21,7 @@ import {
 import { IptvCategory, IptvChannel } from '../../types';
 import { VideoPlayer } from './VideoPlayer';
 import { getFavoriteChannelIds, toggleFavoriteChannel } from '../../utils/iptvStorage';
+import { useShopAuth } from '../../context/ShopAuthContext';
 
 interface LiveTvExplorerProps {
   categories: IptvCategory[];
@@ -41,6 +42,7 @@ export const LiveTvExplorer: React.FC<LiveTvExplorerProps> = ({
   onOpenAdminModal,
   onToggleMultiscreen,
 }) => {
+  const { isSuperAdmin } = useShopAuth();
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [onlyFavorites, setOnlyFavorites] = useState<boolean>(false);
@@ -152,21 +154,23 @@ export const LiveTvExplorer: React.FC<LiveTvExplorerProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onToggleMultiscreen}
-            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 border border-slate-700"
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 border border-slate-700 cursor-pointer"
             title="মাল্টি-স্ক্রিন মোড"
           >
             <Grid className="w-3.5 h-3.5 text-emerald-400" />
             <span>মাল্টি-স্ক্রিন</span>
           </button>
 
-          <button
-            onClick={onOpenAdminModal}
-            className="px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1.5"
-            title="Xtream Codes API ও M3U কনফিগারেশন"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>API সেটিংস</span>
-          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={onOpenAdminModal}
+              className="px-3 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              title="Xtream Codes API ও M3U কনফিগারেশন (সুপার এডমিন)"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>API সেটিংস</span>
+            </button>
+          )}
         </div>
       </div>
 

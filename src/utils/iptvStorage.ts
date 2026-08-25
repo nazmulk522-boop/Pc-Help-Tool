@@ -13,15 +13,33 @@ const STORAGE_KEYS = {
   SERIES_ITEMS: 'shop_iptv_series_items',
 };
 
+export const DEFAULT_XTREAM_ACCOUNT: XtreamAccount = {
+  id: 'xtream_default',
+  name: 'STAR-NETWORK (rgkkw.live)',
+  serverUrl: 'http://rgkkw.live:80',
+  username: '1Aoen7elp5',
+  password: 'IgMJ60tmAa',
+  status: 'Active',
+  expDate: 'Active',
+  maxConnections: '1',
+  activeCons: '1',
+  createdAt: new Date().toISOString(),
+  isDefault: true,
+};
+
 // 1. Get & Save Xtream Accounts
 export function getSavedXtreamAccounts(): XtreamAccount[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.XTREAM_ACCOUNTS);
-    if (!raw) return [];
-    return JSON.parse(raw);
+    if (!raw) return [DEFAULT_XTREAM_ACCOUNT];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return [DEFAULT_XTREAM_ACCOUNT];
+    }
+    return parsed;
   } catch (e) {
     console.error('Failed to load Xtream accounts:', e);
-    return [];
+    return [DEFAULT_XTREAM_ACCOUNT];
   }
 }
 
@@ -540,7 +558,106 @@ export async function syncXtreamContent(account: XtreamAccount): Promise<{
   }
 }
 
-// 7. Get All Available Channels (Merges Default with Xtream/M3U + Favorites)
+// 7. Auto Fetch Live Bundle from Backend Server
+export async function fetchAndCacheLiveBundle(force = false): Promise<{
+  success: boolean;
+  categories: IptvCategory[];
+  channels: IptvChannel[];
+}> {
+  try {
+    const res = await fetch(`/api/iptv/live-bundle${force ? '?force=true' : ''}`);
+    if (!res.ok) {
+      return {
+        success: false,
+        categories: inMemoryCategories.length > 0 ? inMemoryCategories : DEFAULT_IPTV_CATEGORIES,
+        channels: inMemoryChannels.length > 0 ? inMemoryChannels : DEFAULT_IPTV_CHANNELS,
+      };
+    }
+    const json = await res.json();
+    if (json.success && Array.isArray(json.channels) && json.channels.length > 0) {
+      inMemoryChannels = json.channels;
+      inMemoryCategories = json.categories || [];
+      await saveChannelsToIndexedDB(json.channels, json.categories);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_CHANNELS, JSON.stringify(json.channels.slice(0, 150)));
+        localStorage.setItem(STORAGE_KEYS.CUSTOM_CATEGORIES, JSON.stringify((json.categories || []).slice(0, 50)));
+      } catch (e) {}
+
+      return {
+        success: true,
+        categories: inMemoryCategories,
+        channels: inMemoryChannels,
+      };
+    }
+  } catch (e) {
+    console.warn('Could not load live bundle from server:', e);
+  }
+
+  return {
+    success: false,
+    categories: inMemoryCategories.length > 0 ? inMemoryCategories : DEFAULT_IPTV_CATEGORIES,
+    channels: inMemoryChannels.length > 0 ? inMemoryChannels : DEFAULT_IPTV_CHANNELS,
+  };
+}
+
+// Helper to load channels from IndexedDB on startup
+export function loadChannelsFromIndexedDB(): Promise<{
+  categories: IptvCategory[];
+  channels: IptvChannel[];
+} | null> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) {
+      resolve(null);
+      return;
+    }
+    try {
+      const request = indexedDB.open('UltraXC_IPTV_DB', 2);
+      request.onsuccess = (e: any) => {
+        const db = e.target.result;
+        try {
+          if (!db.objectStoreNames.contains('channels') || !db.objectStoreNames.contains('categories')) {
+            resolve(null);
+            return;
+          }
+          const tx = db.transaction(['channels', 'categories'], 'readonly');
+          const chanStore = tx.objectStore('channels');
+          const catStore = tx.objectStore('categories');
+
+          const chanReq = chanStore.getAll();
+          const catReq = catStore.getAll();
+
+          let chanResult: IptvChannel[] = [];
+          let catResult: IptvCategory[] = [];
+
+          chanReq.onsuccess = () => {
+            chanResult = chanReq.result || [];
+          };
+          catReq.onsuccess = () => {
+            catResult = catReq.result || [];
+          };
+
+          tx.oncomplete = () => {
+            if (chanResult.length > 0) {
+              inMemoryChannels = chanResult;
+              inMemoryCategories = catResult;
+              resolve({ channels: chanResult, categories: catResult });
+            } else {
+              resolve(null);
+            }
+          };
+          tx.onerror = () => resolve(null);
+        } catch (txErr) {
+          resolve(null);
+        }
+      };
+      request.onerror = () => resolve(null);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+// 8. Get All Available Channels (Merges Default with Xtream/M3U + Favorites)
 export function getAllAvailableChannels(activeSource = 'default'): {
   categories: IptvCategory[];
   channels: IptvChannel[];

@@ -307,7 +307,7 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
                 </button>
               )}
 
-              {isSuperAdmin ? (
+              {isSuperAdmin && (
                 /* Admin Upload Trigger */
                 <button
                   type="button"
@@ -316,16 +316,6 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
                 >
                   <Upload className="w-3.5 h-3.5 text-white" />
                   <span>ডাটাবেইজ আপলোড</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onOpenLoginModal && onOpenLoginModal('admin_login')}
-                  className="px-2.5 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/30 transition flex items-center gap-1 text-xs font-medium cursor-pointer"
-                  title="এডমিন হিসেবে লগইন করে ডাটাবেজ আপলোড করুন"
-                >
-                  <Lock className="w-3 h-3 text-amber-400" />
-                  <span>এডমিন লগইন (আপলোড)</span>
                 </button>
               )}
             </div>
@@ -363,19 +353,9 @@ ${voter.spouseName ? `স্বামী/স্ত্রী: ${voter.spouseName}
                   </button>
                 </>
               ) : (
-                <div className="space-y-2">
-                  <p className="text-[11px] text-emerald-200/80 leading-relaxed">
-                    ডাটাবেজে এখনও কোনো ভোটার তালিকা যুক্ত করা হয়নি। সুপার এডমিন পাসওয়ার্ড দিয়ে লগইন করে সরাসরি আসন ফোল্ডার বা জিপ ফাইল আপলোড করুন।
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => onOpenLoginModal && onOpenLoginModal('admin_login')}
-                    className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Lock className="w-4 h-4" />
-                    <span>সুপার এডমিন লগইন করে ডাটা আপলোড করুন</span>
-                  </button>
-                </div>
+                <p className="text-[11px] text-emerald-200/80 leading-relaxed">
+                  ডাটাবেজে ভোটার তথ্য প্রক্রিয়াকরণ চলছে। অনুগ্রহ করে পরবর্তীতে পুনরায় চেষ্টা করুন।
+                </p>
               )}
             </div>
           )}

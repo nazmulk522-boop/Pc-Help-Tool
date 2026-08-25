@@ -326,7 +326,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="p-3 bg-slate-950/90 border-t border-slate-800 text-xs">
         <button
           onClick={() => onOpenLoginModal && onOpenLoginModal(isLoggedIn ? 'profile' : 'shop_login')}
-          className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-white transition"
+          className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-900 hover:bg-slate-850 border border-slate-800 text-slate-300 hover:text-white transition cursor-pointer"
         >
           <div className="flex items-center gap-2 truncate">
             {isSuperAdmin ? (
@@ -335,7 +335,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Store className="w-4 h-4 text-blue-400 shrink-0" />
             )}
             <span className="truncate font-semibold">
-              {isLoggedIn ? 'দোকান প্রোফাইল' : 'দোকান / এডমিন লগইন'}
+              {isLoggedIn ? 'দোকানের তথ্য পরিবর্তন' : 'দোকানদার লগইন'}
             </span>
           </div>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-600/30 text-blue-300 font-bold">

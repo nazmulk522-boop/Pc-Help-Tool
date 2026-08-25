@@ -24,7 +24,10 @@ import {
   Download,
   FileSpreadsheet,
   ShieldAlert,
-  Loader2
+  Loader2,
+  Globe,
+  UserPlus,
+  LogIn
 } from 'lucide-react';
 import { exportAllVotersToExcel } from '../utils/pdfVoterParser';
 import { getDatabaseStats, DbStats } from '../utils/voterDb';
@@ -32,33 +35,42 @@ import { getDatabaseStats, DbStats } from '../utils/voterDb';
 interface LoginProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'shop_login' | 'admin_login' | 'profile';
+  initialTab?: 'login' | 'register' | 'admin_login' | 'profile' | 'shop_login';
   onOpenVoterDbModal?: () => void;
 }
 
 export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
   isOpen,
   onClose,
-  initialTab = 'shop_login',
+  initialTab = 'login',
   onOpenVoterDbModal,
 }) => {
   const {
     currentProfile,
     isLoggedIn,
     isSuperAdmin,
+    clientIp,
+    ipMismatchError,
     registeredShops,
-    verifyAdminPassword,
-    loginAsAdmin,
-    changeAdminPassword,
-    resetAdminPassword,
-    loginAsShopOwner,
+    loginWithCredentials,
+    registerShopOwner,
     updateShopProfile,
+    changeUserPassword,
     logout,
     deleteShopByAdmin,
+    clearIpMismatchError,
   } = useShopAuth();
 
-  const [activeTab, setActiveTab] = useState<'shop_login' | 'admin_login' | 'profile'>(
-    isLoggedIn ? 'profile' : initialTab
+  const normalizedInitialTab = () => {
+    if (isLoggedIn) return 'profile';
+    if (initialTab === 'shop_login' || initialTab === 'login') return 'login';
+    if (initialTab === 'register') return 'register';
+    if (initialTab === 'admin_login') return 'admin_login';
+    return 'login';
+  };
+
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'admin_login' | 'profile'>(
+    normalizedInitialTab()
   );
 
   // Database stats & Download states
@@ -68,22 +80,29 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
   const [approvalPassword, setApprovalPassword] = useState('');
   const [approvalError, setApprovalError] = useState('');
 
-  // Shop Owner Form State
-  const [shopEmail, setShopEmail] = useState('');
-  const [ownerName, setOwnerName] = useState('');
-  const [shopName, setShopName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
-  const [tagline, setTagline] = useState('');
+  // Login Form State
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Admin Form State (Manual Entry - No hardcoded email)
-  const [adminEmailInput, setAdminEmailInput] = useState('');
-  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  // Register Form State
+  const [regEmail, setRegEmail] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regShopName, setRegShopName] = useState('');
+  const [regOwnerName, setRegOwnerName] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regAddress, setRegAddress] = useState('');
+  const [regTagline, setRegTagline] = useState('');
 
-  // Password Management for Admin
+  // Admin Login State
+  const [adminEmail, setAdminEmail] = useState('nazmulk522@gmail.com');
+  const [adminPassword, setAdminPassword] = useState('');
+
+  // Password Change State
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showPasswordChangeForm, setShowPasswordChangeForm] = useState(false);
 
   // Edit Profile Form State
@@ -108,7 +127,13 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
       setEditAddress(currentProfile.address || '');
       setEditTagline(currentProfile.tagline || '');
     } else {
-      setActiveTab(initialTab);
+      if (initialTab === 'register') {
+        setActiveTab('register');
+      } else if (initialTab === 'admin_login') {
+        setActiveTab('admin_login');
+      } else {
+        setActiveTab('login');
+      }
     }
   }, [isLoggedIn, currentProfile, initialTab, isOpen]);
 
@@ -120,6 +145,165 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
         .catch((err) => console.error('Failed to load db stats in modal:', err));
     }
   }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  // 1. Handle Login Submit
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginEmail.trim() || !loginEmail.includes('@')) {
+      setStatusMessage({ type: 'error', text: 'দয়া করে একটি সঠিক জিমেইল বা ইমেইল ঠিকানা দিন।' });
+      return;
+    }
+    if (!loginPassword.trim()) {
+      setStatusMessage({ type: 'error', text: 'পাসওয়ার্ড প্রদান করুন।' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    const res = await loginWithCredentials(loginEmail, loginPassword);
+    setIsSubmitting(false);
+
+    if (res.success) {
+      setStatusMessage({ type: 'success', text: res.message });
+      setTimeout(() => {
+        setStatusMessage(null);
+        onClose();
+      }, 1000);
+    } else {
+      setStatusMessage({ type: 'error', text: res.message });
+    }
+  };
+
+  // 2. Handle Register Submit
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regEmail.trim() || !regEmail.includes('@')) {
+      setStatusMessage({ type: 'error', text: 'সঠিক ইমেইল বা জিমেইল ঠিকানা দিন।' });
+      return;
+    }
+    if (!regPassword.trim() || regPassword.length < 4) {
+      setStatusMessage({ type: 'error', text: 'পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে।' });
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      setStatusMessage({ type: 'error', text: 'পাসওয়ার্ড ও কনফার্ম পাসওয়ার্ড মিলছে না।' });
+      return;
+    }
+    if (!regShopName.trim()) {
+      setStatusMessage({ type: 'error', text: 'দোকানের নাম আবশ্যক।' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    const res = await registerShopOwner({
+      email: regEmail,
+      password: regPassword,
+      shopName: regShopName,
+      ownerName: regOwnerName || 'দোকান পরিচালক',
+      phone: regPhone,
+      address: regAddress,
+      tagline: regTagline,
+    });
+    setIsSubmitting(false);
+
+    if (res.success) {
+      setStatusMessage({ type: 'success', text: res.message });
+      setTimeout(() => {
+        setStatusMessage(null);
+        onClose();
+      }, 1000);
+    } else {
+      setStatusMessage({ type: 'error', text: res.message });
+    }
+  };
+
+  // 3. Handle Admin Login Submit
+  const handleAdminLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminEmail.trim() || !adminEmail.includes('@')) {
+      setStatusMessage({ type: 'error', text: 'এডমিন জিমেইল লিখুন।' });
+      return;
+    }
+    if (!adminPassword.trim()) {
+      setStatusMessage({ type: 'error', text: 'এডমিন পাসওয়ার্ড দিন (ডিফল্ট: admin123)।' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    const res = await loginWithCredentials(adminEmail, adminPassword);
+    setIsSubmitting(false);
+
+    if (res.success) {
+      setStatusMessage({ type: 'success', text: res.message });
+      setTimeout(() => {
+        setStatusMessage(null);
+        onClose();
+      }, 1000);
+    } else {
+      setStatusMessage({ type: 'error', text: res.message });
+    }
+  };
+
+  // 4. Handle Password Change
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!oldPassword.trim()) {
+      setStatusMessage({ type: 'error', text: 'বর্তমান পাসওয়ার্ড লিখুন।' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setStatusMessage({ type: 'error', text: 'নতুন পাসওয়ার্ড এবং নিশ্চিতকরণ মিলছে না।' });
+      return;
+    }
+    if (newPassword.length < 4) {
+      setStatusMessage({ type: 'error', text: 'নতুন পাসওয়ার্ড কমপক্ষে ৪ অক্ষরের হতে হবে।' });
+      return;
+    }
+
+    const res = await changeUserPassword(oldPassword, newPassword);
+    if (res.success) {
+      setStatusMessage({ type: 'success', text: res.message });
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setShowPasswordChangeForm(false);
+    } else {
+      setStatusMessage({ type: 'error', text: res.message });
+    }
+  };
+
+  // 5. Handle Profile Save
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editShopName.trim()) {
+      setStatusMessage({ type: 'error', text: 'দোকানের নাম খালি রাখা যাবে না।' });
+      return;
+    }
+
+    const ok = await updateShopProfile({
+      shopName: editShopName.trim(),
+      ownerName: editOwnerName.trim(),
+      phone: editPhone.trim(),
+      address: editAddress.trim(),
+      tagline: editTagline.trim(),
+    });
+
+    if (ok) {
+      setStatusMessage({
+        type: 'success',
+        text: 'দোকানের নাম ও তথ্য সফলভাবে আপডেট হয়েছে!',
+      });
+      setTimeout(() => {
+        setStatusMessage(null);
+      }, 2500);
+    } else {
+      setStatusMessage({
+        type: 'error',
+        text: 'তথ্য আপডেট করতে ব্যর্থ হয়েছে।',
+      });
+    }
+  };
 
   // Execute Direct Excel Export
   const executeDatabaseDownload = async () => {
@@ -138,7 +322,6 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
         });
       }
     } catch (e) {
-      console.error(e);
       setStatusMessage({
         type: 'error',
         text: 'ডাউনলোড করতে সমস্যা হয়েছে।',
@@ -148,7 +331,6 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
     }
   };
 
-  // Check if admin or request approval
   const handleInitiateDatabaseDownload = () => {
     if (isSuperAdmin) {
       executeDatabaseDownload();
@@ -159,10 +341,9 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
     }
   };
 
-  // Verify Admin Approval
   const handleApproveAndDownload = (e: React.FormEvent) => {
     e.preventDefault();
-    if (verifyAdminPassword(approvalPassword)) {
+    if (approvalPassword.trim() === 'admin123') {
       setShowAdminApprovalDialog(false);
       setApprovalPassword('');
       setApprovalError('');
@@ -170,120 +351,6 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
     } else {
       setApprovalError('ভুল এডমিন পাসওয়ার্ড! অনুমোদন ছাড়া ডাটাবেজ ডাউনলোড হবে না।');
     }
-  };
-
-  if (!isOpen) return null;
-
-  // Handle Shop Owner Login
-  const handleShopLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!shopEmail.trim() || !shopEmail.includes('@')) {
-      setStatusMessage({ type: 'error', text: 'দয়া করে একটি সঠিক জিমেইল বা ইমেইল ঠিকানা দিন।' });
-      return;
-    }
-    if (!shopName.trim()) {
-      setStatusMessage({ type: 'error', text: 'দোকানের নাম আবশ্যক।' });
-      return;
-    }
-
-    const res = loginAsShopOwner({
-      email: shopEmail,
-      ownerName: ownerName || 'দোকান পরিচালক',
-      shopName,
-      phone,
-      address,
-      tagline,
-    });
-
-    if (res.success) {
-      setStatusMessage({ type: 'success', text: res.message });
-      setTimeout(() => {
-        setStatusMessage(null);
-        onClose();
-      }, 1200);
-    } else {
-      setStatusMessage({ type: 'error', text: res.message });
-    }
-  };
-
-  // Handle Admin Login with Manual Email & Password
-  const handleAdminLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!adminEmailInput.trim() || !adminEmailInput.includes('@')) {
-      setStatusMessage({ type: 'error', text: 'অনুগ্রহ করে সঠিক এডমিন জিমেইল ঠিকানা লিখুন।' });
-      return;
-    }
-    if (!adminPasswordInput.trim()) {
-      setStatusMessage({ type: 'error', text: 'এডমিন পাসওয়ার্ড দিন (ডিফল্ট: admin123)।' });
-      return;
-    }
-
-    const res = loginAsAdmin(adminEmailInput, adminPasswordInput);
-    if (res.success) {
-      setStatusMessage({ type: 'success', text: res.message });
-      setTimeout(() => {
-        setStatusMessage(null);
-        onClose();
-      }, 1200);
-    } else {
-      setStatusMessage({ type: 'error', text: res.message });
-    }
-  };
-
-  // Handle Admin Password Change
-  const handleChangePasswordSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!oldPassword.trim()) {
-      setStatusMessage({ type: 'error', text: 'বর্তমান পাসওয়ার্ড লিখুন।' });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setStatusMessage({ type: 'error', text: 'নতুন পাসওয়ার্ড এবং নিশ্চিতকরণ মিলছে না।' });
-      return;
-    }
-    const res = changeAdminPassword(oldPassword, newPassword);
-    if (res.success) {
-      setStatusMessage({ type: 'success', text: res.message });
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setShowPasswordChangeForm(false);
-    } else {
-      setStatusMessage({ type: 'error', text: res.message });
-    }
-  };
-
-  // Handle Reset Password to Default
-  const handleResetPassword = () => {
-    if (window.confirm('আপনি কি এডমিন পাসওয়ার্ড রিসেট করে ডিফল্ট (admin123) করতে চান?')) {
-      const res = resetAdminPassword();
-      setStatusMessage({ type: 'success', text: res.message });
-    }
-  };
-
-  // Handle Profile Update
-  const handleProfileSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editShopName.trim()) {
-      setStatusMessage({ type: 'error', text: 'দোকানের নাম খালি রাখা যাবে না।' });
-      return;
-    }
-
-    updateShopProfile({
-      shopName: editShopName.trim(),
-      ownerName: editOwnerName.trim(),
-      phone: editPhone.trim(),
-      address: editAddress.trim(),
-      tagline: editTagline.trim(),
-    });
-
-    setStatusMessage({
-      type: 'success',
-      text: 'দোকানের নাম ও তথ্য সফলভাবে আপডেট হয়েছে! হোমপেজে নতুন নাম প্রদর্শিত হচ্ছে।',
-    });
-    setTimeout(() => {
-      setStatusMessage(null);
-    }, 2500);
   };
 
   return (
@@ -313,57 +380,83 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     )}
                   </>
                 ) : (
-                  'লগইন ও শপ প্রোফাইল পোর্টাল'
+                  'লগইন ও শপ রেজিস্ট্রেশন পোর্টাল'
                 )}
               </h2>
               <p className="text-xs text-slate-300">
                 {isLoggedIn
                   ? `${currentProfile.ownerEmail || 'লগইন প্রোফাইল'} (${currentProfile.ownerName})`
-                  : 'দোকানদার বা এডমিন হিসেবে লগইন করুন'}
+                  : 'যেকোনো ট্যাব থেকে কাজ করতে আপনার ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করুন'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition"
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition cursor-pointer"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* IP Security Banner */}
+        <div className="bg-slate-100 border-b border-slate-200 px-5 py-2 flex items-center justify-between text-[11px] text-slate-600">
+          <div className="flex items-center gap-1.5 font-mono">
+            <Globe className="w-3.5 h-3.5 text-blue-600" />
+            <span>বর্তমান আইপি (IP):</span>
+            <span className="font-bold text-slate-800 bg-white px-1.5 py-0.5 rounded border border-slate-300">
+              {clientIp || 'সনাক্ত করা হচ্ছে...'}
+            </span>
+          </div>
+          <span className="hidden sm:inline text-slate-500">
+            🔒 একই ডিভাইসে/আইপিতে লগইন স্বয়ংক্রিয়ভাবে সংরক্ষিত থাকে
+          </span>
+        </div>
+
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 bg-slate-50 px-4 pt-2 gap-2 text-xs font-semibold">
+        <div className="flex border-b border-slate-200 bg-slate-50 px-4 pt-2 gap-2 text-xs font-semibold overflow-x-auto">
           {!isLoggedIn ? (
             <>
               <button
                 onClick={() => {
-                  setActiveTab('shop_login');
+                  setActiveTab('login');
                   setStatusMessage(null);
                 }}
-                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition ${
-                  activeTab === 'shop_login'
-                    ? 'border-blue-600 text-blue-600 font-bold bg-white rounded-t-lg'
+                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                  activeTab === 'login'
+                    ? 'border-blue-600 text-blue-600 font-bold bg-white rounded-t-lg shadow-2xs'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
-                <Store className="w-4 h-4" />
-                <span>দোকানদার লগইন (Shop Login)</span>
+                <LogIn className="w-4 h-4" />
+                <span>দোকানদার লগইন (Login)</span>
               </button>
               <button
                 onClick={() => {
-                  setActiveTab('admin_login');
+                  setActiveTab('register');
                   setStatusMessage(null);
                 }}
-                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition ${
-                  activeTab === 'admin_login'
-                    ? 'border-amber-600 text-amber-600 font-bold bg-white rounded-t-lg'
+                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
+                  activeTab === 'register'
+                    ? 'border-emerald-600 text-emerald-600 font-bold bg-white rounded-t-lg shadow-2xs'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
-                <ShieldCheck className="w-4 h-4 text-amber-500" />
-                <span>এডমিন লগইন (Admin Login)</span>
+                <UserPlus className="w-4 h-4 text-emerald-600" />
+                <span>নতুন দোকান রেজিস্ট্রেশন (Register)</span>
               </button>
+              {activeTab === 'admin_login' && (
+                <button
+                  onClick={() => {
+                    setActiveTab('admin_login');
+                    setStatusMessage(null);
+                  }}
+                  className="pb-2.5 px-3 border-b-2 border-amber-600 text-amber-600 font-bold bg-white rounded-t-lg shadow-2xs flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                >
+                  <ShieldCheck className="w-4 h-4 text-amber-500" />
+                  <span>এডমিন লগইন</span>
+                </button>
+              )}
             </>
           ) : (
             <>
@@ -372,9 +465,9 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                   setActiveTab('profile');
                   setStatusMessage(null);
                 }}
-                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition ${
+                className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition cursor-pointer ${
                   activeTab === 'profile'
-                    ? 'border-blue-600 text-blue-600 font-bold bg-white rounded-t-lg'
+                    ? 'border-blue-600 text-blue-600 font-bold bg-white rounded-t-lg shadow-2xs'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -387,14 +480,14 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     setActiveTab('admin_login');
                     setStatusMessage(null);
                   }}
-                  className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition ${
+                  className={`pb-2.5 px-3 border-b-2 flex items-center gap-1.5 transition cursor-pointer ${
                     activeTab === 'admin_login'
-                      ? 'border-amber-600 text-amber-600 font-bold bg-white rounded-t-lg'
+                      ? 'border-amber-600 text-amber-600 font-bold bg-white rounded-t-lg shadow-2xs'
                       : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   <Sliders className="w-4 h-4 text-amber-500" />
-                  <span>এডমিন কন্ট্রোল ও পাসওয়ার্ড</span>
+                  <span>এডমিন কন্ট্রোল ও ইউজার লিস্ট</span>
                 </button>
               )}
             </>
@@ -403,6 +496,23 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
 
         {/* Modal Body Content */}
         <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-4 text-xs">
+          {/* IP Mismatch Warning Alert */}
+          {ipMismatchError && (
+            <div className="p-3 bg-amber-50 border-2 border-amber-400 rounded-xl flex items-start gap-2.5 text-xs text-amber-950 font-medium animate-in fade-in">
+              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-amber-900">আইপি (IP) পরিবর্তন সংক্রান্ত নোটিশ:</p>
+                <p className="text-[11px] leading-relaxed text-amber-900">{ipMismatchError}</p>
+                <button
+                  onClick={clearIpMismatchError}
+                  className="text-[10px] text-amber-700 underline font-semibold mt-1"
+                >
+                  নোটিশ বন্ধ করুন
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Status Message Notification */}
           {statusMessage && (
             <div
@@ -421,72 +531,189 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
             </div>
           )}
 
-          {/* TAB 1: SHOP OWNER LOGIN */}
-          {activeTab === 'shop_login' && !isLoggedIn && (
-            <form onSubmit={handleShopLoginSubmit} className="space-y-3.5">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-950 space-y-1">
-                <p className="font-bold flex items-center gap-1.5 text-xs">
+          {/* TAB 1: LOGIN (EMAIL + PASSWORD) */}
+          {activeTab === 'login' && !isLoggedIn && (
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5">
+              <div className="bg-blue-50/80 border border-blue-200 rounded-xl p-3 text-blue-950 space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-xs text-blue-900">
                   <Sparkles className="w-4 h-4 text-blue-600" />
-                  <span>দোকানের প্রোফাইল তৈরির সুবিধা:</span>
+                  <span>ইমেইল ও পাসওয়ার্ড দিয়ে লগইন:</span>
                 </p>
                 <p className="text-[11px] text-blue-900 leading-relaxed">
-                  আপনার জিমেইল দিয়ে লগইন করে একবার দোকানের নাম লিখে দিলেই পুরো সফটওয়্যারের হোমপেজ ও রিসিটে আপনার দোকানের নাম সেট হয়ে যাবে।
+                  রেজিস্ট্রেশন করার সময় দেওয়া ইমেইল এবং পাসওয়ার্ড লিখুন। একই ডিভাইসে/আইপিতে থাকলে পরবর্তীতে অটো লগইন থাকবে।
                 </p>
               </div>
 
               <div>
                 <label className="block font-bold text-slate-800 mb-1">
-                  আপনার জিমেইল / ইমেইল <span className="text-rose-500">*</span>
+                  আপনার রেজিস্টার্ড ইমেইল / জিমেইল <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     type="email"
                     required
-                    value={shopEmail}
-                    onChange={(e) => setShopEmail(e.target.value)}
-                    placeholder="আপনার_জিমেইল@gmail.com"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    placeholder="আপনার_ইমেইল@gmail.com"
                     className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white"
                   />
                 </div>
               </div>
 
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">
+                  পাসওয়ার্ড <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="password"
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder="আপনার পাসওয়ার্ড লিখুন"
+                    className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs active:scale-98 cursor-pointer"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>যাচাই করা হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>লগইন করুন</span>
+                  </>
+                )}
+              </button>
+
+              <div className="pt-2 text-center text-xs text-slate-600">
+                <span>অ্যাকাউন্ট নেই? </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('register');
+                    setStatusMessage(null);
+                  }}
+                  className="text-emerald-700 font-bold hover:underline cursor-pointer"
+                >
+                  নতুন অ্যাকাউন্ট রেজিস্ট্রেশন করুন
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* TAB 2: REGISTER (NEW ACCOUNT) */}
+          {activeTab === 'register' && !isLoggedIn && (
+            <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-xs text-emerald-900">
+                  <UserPlus className="w-4 h-4 text-emerald-600" />
+                  <span>নতুন দোকান ও স্টুডিও অ্যাকাউন্ট রেজিস্ট্রেশন:</span>
+                </p>
+                <p className="text-[11px] text-emerald-900 leading-relaxed">
+                  আপনার ইমেইল ও পাসওয়ার্ড দিয়ে একবার একাউন্ট খুলুন। পরবর্তীতে যেকোনো ট্যাব থেকে এই ইমেইল ও পাসওয়ার্ড দিয়ে লগইন করতে পারবেন।
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-800 mb-1">
-                    দোকানের নাম (Shop Name) <span className="text-rose-500">*</span>
+                    আপনার জিমেইল / ইমেইল <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="email"
+                      required
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      placeholder="আপনার_জিমেইল@gmail.com"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    দোকানের নাম <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <Store className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                     <input
                       type="text"
                       required
-                      value={shopName}
-                      onChange={(e) => setShopName(e.target.value)}
-                      placeholder="e.g. ডিজিটাল কম্পিউটার শপ ও স্টুডিও"
-                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white font-medium"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-800 mb-1">
-                    মালিক / প্রোপাইটার নাম
-                  </label>
-                  <div className="relative">
-                    <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={ownerName}
-                      onChange={(e) => setOwnerName(e.target.value)}
-                      placeholder="e.g. মোঃ নাজমুল হোসেন"
-                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white"
+                      value={regShopName}
+                      onChange={(e) => setRegShopName(e.target.value)}
+                      placeholder="e.g. ডিজিটাল কম্পিউটার শপ"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white font-medium"
                     />
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    লগইন পাসওয়ার্ড তৈরি করুন <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="password"
+                      required
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      placeholder="কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    পাসওয়ার্ড নিশ্চিত করুন <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="password"
+                      required
+                      value={regConfirmPassword}
+                      onChange={(e) => setRegConfirmPassword(e.target.value)}
+                      placeholder="পুনরায় পাসওয়ার্ড দিন"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    মালিক / পরিচালকের নাম
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={regOwnerName}
+                      onChange={(e) => setRegOwnerName(e.target.value)}
+                      placeholder="e.g. মোঃ নাজমুল হোসেন"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white"
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block font-bold text-slate-800 mb-1">
                     মোবাইল নম্বর
@@ -495,55 +722,81 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                     <input
                       type="text"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+8809649487206"
-                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white font-mono"
+                      value={regPhone}
+                      onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="+88017xxxxxxxx"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-800 mb-1">
+                    দোকানের ঠিকানা
+                  </label>
+                  <div className="relative">
+                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={regAddress}
+                      onChange={(e) => setRegAddress(e.target.value)}
+                      placeholder="সাবানা রোড, বনবাড়িয়া"
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white"
                     />
                   </div>
                 </div>
 
                 <div>
                   <label className="block font-bold text-slate-800 mb-1">
-                    দোকানের ঠিকানা / বাজার
+                    স্লোগান বা সেবাসমূহ
                   </label>
-                  <div className="relative">
-                    <MapPin className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
-                      placeholder="সাবানা রোড, বনবাড়িয়া"
-                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={regTagline}
+                    onChange={(e) => setRegTagline(e.target.value)}
+                    placeholder="অনলাইন আবেদন ও ফটো স্টুডিও"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-xs bg-white"
+                  />
                 </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-800 mb-1">
-                  স্লোগান বা সেবাসমূহ (ঐচ্ছিক)
-                </label>
-                <input
-                  type="text"
-                  value={tagline}
-                  onChange={(e) => setTagline(e.target.value)}
-                  placeholder="যেমন: অনলাইন আবেদন, NID সংশোধন ও ফটো স্টুডিও"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white"
-                />
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs active:scale-98"
+                disabled={isSubmitting}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs active:scale-98 cursor-pointer"
               >
-                <Store className="w-4 h-4" />
-                <span>দোকান প্রোফাইলে লগইন করুন</span>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>একাউন্ট তৈরি হচ্ছে...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    <span>একাউন্ট তৈরি ও লগইন করুন</span>
+                  </>
+                )}
               </button>
+
+              <div className="pt-2 text-center text-xs text-slate-600">
+                <span>ইতিমধ্যে অ্যাকাউন্ট আছে? </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('login');
+                    setStatusMessage(null);
+                  }}
+                  className="text-blue-700 font-bold hover:underline cursor-pointer"
+                >
+                  লগইন পেইজে যান
+                </button>
+              </div>
             </form>
           )}
 
-          {/* TAB 2: ADMIN LOGIN & ADMIN CONTROLS */}
+          {/* TAB 3: ADMIN LOGIN & CONTROLS */}
           {activeTab === 'admin_login' && (
             <div className="space-y-4">
               {!isLoggedIn || !isSuperAdmin ? (
@@ -551,25 +804,25 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-950 space-y-1">
                     <p className="font-bold flex items-center gap-1.5 text-xs text-amber-900">
                       <ShieldCheck className="w-4 h-4 text-amber-600" />
-                      <span>এডমিন লগইন (ম্যানুয়াল এন্ট্রি):</span>
+                      <span>সুপার এডমিন লগইন:</span>
                     </p>
                     <p className="text-[11px] text-amber-900 leading-relaxed">
-                      আপনার নিজস্ব এডমিন জিমেইল ও পাসওয়ার্ড প্রদান করে সিস্টেমে লগইন করুন।
+                      এডমিন ইমেইল ও পাসওয়ার্ড প্রদান করে সিস্টেমে সুপার এডমিন হিসেবে প্রবেশ করুন।
                     </p>
                   </div>
 
                   <div>
                     <label className="block font-bold text-slate-800 mb-1">
-                      এডমিন জিমেইল / ইমেইল <span className="text-amber-600">*</span>
+                      এডমিন ইমেইল <span className="text-amber-600">*</span>
                     </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                       <input
                         type="email"
                         required
-                        value={adminEmailInput}
-                        onChange={(e) => setAdminEmailInput(e.target.value)}
-                        placeholder="আপনার_এডমিন_জিমেইল@gmail.com"
+                        value={adminEmail}
+                        onChange={(e) => setAdminEmail(e.target.value)}
+                        placeholder="nazmulk522@gmail.com"
                         className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden text-xs bg-white font-medium"
                       />
                     </div>
@@ -584,9 +837,9 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                       <input
                         type="password"
                         required
-                        value={adminPasswordInput}
-                        onChange={(e) => setAdminPasswordInput(e.target.value)}
-                        placeholder="এডমিন পাসওয়ার্ড লিখুন"
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        placeholder="এডমিন পাসওয়ার্ড (ডিফল্ট: admin123)"
                         className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden text-xs bg-white"
                       />
                     </div>
@@ -594,14 +847,24 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
 
                   <button
                     type="submit"
-                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs active:scale-98"
+                    disabled={isSubmitting}
+                    className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs active:scale-98 cursor-pointer"
                   >
-                    <ShieldCheck className="w-4 h-4" />
-                    <span>এডমিন হিসেবে লগইন করুন</span>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>যাচাই হচ্ছে...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>এডমিন হিসেবে লগইন করুন</span>
+                      </>
+                    )}
                   </button>
                 </form>
               ) : (
-                /* Super Admin Dashboard & Password Management */
+                /* Super Admin Dashboard & User Management */
                 <div className="space-y-4">
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between">
                     <div>
@@ -617,7 +880,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     </span>
                   </div>
 
-                  {/* Voter Database & Seat Download Action with Admin Approval Workflow */}
+                  {/* Voter Database Download Card */}
                   <div className="p-4 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border-2 border-emerald-500/50 rounded-2xl text-white space-y-3 shadow-xl">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400 shrink-0">
@@ -658,93 +921,13 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     </button>
                   </div>
 
-                  {/* Password Management Accordion / Box */}
-                  <div className="border border-slate-200 rounded-xl p-3.5 bg-slate-50 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 font-bold text-slate-900 text-xs">
-                        <Key className="w-4 h-4 text-amber-600" />
-                        <span>এডমিন পাসওয়ার্ড পরিবর্তন ও রিস্টার্ট</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowPasswordChangeForm(!showPasswordChangeForm)}
-                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px] font-bold"
-                        >
-                          {showPasswordChangeForm ? 'বন্ধ করুন' : 'পাসওয়ার্ড পরিবর্তন'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleResetPassword}
-                          className="px-2 py-1 border border-slate-300 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold flex items-center gap-1"
-                          title="পাসওয়ার্ড রিস্টার্ট / রিসেট করুন"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          <span>রিসেট</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {showPasswordChangeForm && (
-                      <form onSubmit={handleChangePasswordSubmit} className="pt-2 border-t border-slate-200 space-y-2.5">
-                        <div>
-                          <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
-                            বর্তমান পাসওয়ার্ড
-                          </label>
-                          <input
-                            type="password"
-                            required
-                            value={oldPassword}
-                            onChange={(e) => setOldPassword(e.target.value)}
-                            placeholder="বর্তমান পাসওয়ার্ড দিন"
-                            className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
-                          />
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div>
-                            <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
-                              নতুন পাসওয়ার্ড
-                            </label>
-                            <input
-                              type="password"
-                              required
-                              value={newPassword}
-                              onChange={(e) => setNewPassword(e.target.value)}
-                              placeholder="নতুন পাসওয়ার্ড দিন"
-                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
-                            />
-                          </div>
-                          <div>
-                            <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
-                              নতুন পাসওয়ার্ড নিশ্চিত করুন
-                            </label>
-                            <input
-                              type="password"
-                              required
-                              value={confirmPassword}
-                              onChange={(e) => setConfirmPassword(e.target.value)}
-                              placeholder="পুনরায় পাসওয়ার্ড দিন"
-                              className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
-                            />
-                          </div>
-                        </div>
-                        <button
-                          type="submit"
-                          className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition"
-                        >
-                          পাসওয়ার্ড পরিবর্তন সম্পন্ন করুন
-                        </button>
-                      </form>
-                    )}
-                  </div>
-
-                  {/* Registered Shops List for Admin */}
+                  {/* Registered Shops List for Super Admin */}
                   {registeredShops.length > 0 && (
                     <div className="space-y-2">
                       <h4 className="font-bold text-slate-800 text-xs">
                         নিবন্ধিত দোকানের তালিকা:
                       </h4>
-                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
                         {registeredShops.map((shop) => (
                           <div
                             key={shop.shopId}
@@ -754,17 +937,17 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                               <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
                                 <span>{shop.shopName}</span>
                                 {shop.role === 'super_admin' && (
-                                  <span className="text-[9px] bg-amber-200 text-amber-800 px-1.5 rounded">এডমিন</span>
+                                  <span className="text-[9px] bg-amber-200 text-amber-800 px-1.5 rounded font-bold">এডমিন</span>
                                 )}
                               </div>
                               <div className="text-[10px] text-slate-500">
-                                {shop.ownerEmail} • {shop.phone || 'মোবাইল নেই'} • {shop.address || 'ঠিকানা নেই'}
+                                {shop.ownerEmail} • {shop.ownerName} • {shop.phone || 'মোবাইল নেই'}
                               </div>
                             </div>
                             {shop.role !== 'super_admin' && (
                               <button
                                 onClick={() => deleteShopByAdmin(shop.shopId)}
-                                className="p-1 text-rose-500 hover:bg-rose-50 rounded"
+                                className="p-1 text-rose-500 hover:bg-rose-50 rounded cursor-pointer"
                                 title="দোকান মুছে ফেলুন"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
@@ -780,7 +963,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: PROFILE & SHOP NAME CHANGE */}
+          {/* TAB 4: PROFILE & SHOP NAME CHANGE (LOGGED IN) */}
           {activeTab === 'profile' && isLoggedIn && (
             <form onSubmit={handleProfileSave} className="space-y-3.5">
               {/* Live Preview Card */}
@@ -803,7 +986,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
 
               <div>
                 <label className="block font-bold text-slate-800 mb-1">
-                  দোকানের নাম (হোমপেজে যা শো করবে) <span className="text-rose-500">*</span>
+                  দোকানের নাম (হোমপেজে যা প্রদর্শিত হবে) <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <Store className="w-4 h-4 text-blue-600 absolute left-3 top-2.5" />
@@ -816,9 +999,6 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     className="w-full pl-9 pr-3 py-2 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-hidden text-xs bg-white font-bold text-slate-900"
                   />
                 </div>
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
-                  💡 আপনি এইখানে যে নাম দিবেন, আপনার হোমপেজের প্রধান শিরোনাম ও হেডারে সেই নামটিই থাকবে।
-                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -871,7 +1051,74 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                 </div>
               </div>
 
-              {/* Database Download Card for All Users / Shop Owners */}
+              {/* Password Change Toggle */}
+              <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-900 text-xs">
+                    <Key className="w-4 h-4 text-blue-600" />
+                    <span>পাসওয়ার্ড পরিবর্তন করুন</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPasswordChangeForm(!showPasswordChangeForm)}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-[11px] font-bold cursor-pointer"
+                  >
+                    {showPasswordChangeForm ? 'বন্ধ করুন' : 'পাসওয়ার্ড পরিবর্তন'}
+                  </button>
+                </div>
+
+                {showPasswordChangeForm && (
+                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                    <div>
+                      <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                        বর্তমান পাসওয়ার্ড
+                      </label>
+                      <input
+                        type="password"
+                        value={oldPassword}
+                        onChange={(e) => setOldPassword(e.target.value)}
+                        placeholder="বর্তমান পাসওয়ার্ড"
+                        className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                          নতুন পাসওয়ার্ড
+                        </label>
+                        <input
+                          type="password"
+                          value={newPassword}
+                          onChange={(e) => setNewPassword(e.target.value)}
+                          placeholder="নতুন পাসওয়ার্ড"
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 text-[11px] mb-0.5">
+                          নতুন পাসওয়ার্ড নিশ্চিত করুন
+                        </label>
+                        <input
+                          type="password"
+                          value={confirmNewPassword}
+                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                          placeholder="কনফার্ম পাসওয়ার্ড"
+                          className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs bg-white"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleChangePasswordSubmit}
+                      className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs cursor-pointer"
+                    >
+                      নতুন পাসওয়ার্ড সেট করুন
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Database Download Card */}
               <div className="p-3.5 bg-slate-900 border border-slate-700 rounded-xl text-white space-y-2.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -882,16 +1129,11 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                     {dbStats?.totalVoters ? `${dbStats.totalVoters.toLocaleString('bn-BD')} ভোটার` : '০ ভোটার'}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-300">
-                  {isSuperAdmin
-                    ? 'সুপার এডমিন হিসেবে সম্পূর্ণ ভোটার তালিকা এক ক্লিকে ডাউনলোড করুন।'
-                    : 'দোকানদার হিসেবে ডাটাবেজ ডাউনলোড করতে সুপার এডমিনের অনুমোদন প্রয়োজন হবে।'}
-                </p>
                 <button
                   type="button"
                   disabled={isDownloading}
                   onClick={handleInitiateDatabaseDownload}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1.5"
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   {isDownloading ? (
                     <>
@@ -910,18 +1152,18 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
               <div className="pt-2 flex items-center gap-3">
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs"
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>দোকানের নাম ও তথ্য সংরক্ষণ করুন</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    logout();
+                  onClick={async () => {
+                    await logout();
                     onClose();
                   }}
-                  className="px-3 py-2.5 border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold rounded-xl transition flex items-center gap-1.5 text-xs shrink-0"
+                  className="px-3 py-2.5 border border-rose-300 text-rose-600 hover:bg-rose-50 font-bold rounded-xl transition flex items-center gap-1.5 text-xs shrink-0 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>লগআউট</span>
@@ -941,7 +1183,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
               <div className="text-center space-y-1">
                 <h4 className="font-bold text-sm text-white">🔒 এডমিন অনুমোদন আবশ্যক</h4>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  দোকানদার বা সাধারণ ব্যবহারকারী ডাউনলোড করতে চাইলে সুপার এডমিন এর পাসওয়ার্ড দিয়ে অনুমোদন নিশ্চিত করতে হবে।
+                  ভোটার ডাটাবেজ ডাউনলোড করতে সুপার এডমিন এর পাসওয়ার্ড দিয়ে অনুমোদন নিশ্চিত করুন।
                 </p>
               </div>
 
@@ -956,7 +1198,7 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                       setApprovalPassword(e.target.value);
                       setApprovalError('');
                     }}
-                    placeholder="এডমিন পাসওয়ার্ড দিন (যেমন: admin123)"
+                    placeholder="এডমিন পাসওয়ার্ড দিন (admin123)"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                   />
                   {approvalError && (
@@ -975,13 +1217,13 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
                       setApprovalPassword('');
                       setApprovalError('');
                     }}
-                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold"
+                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold cursor-pointer"
                   >
                     বাতিল
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-md shadow-amber-950"
+                    className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 shadow-md shadow-amber-950 cursor-pointer"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>অনুমোদন ও ডাউনলোড</span>
@@ -994,10 +1236,10 @@ export const LoginProfileModal: React.FC<LoginProfileModalProps> = ({
 
         {/* Modal Footer */}
         <div className="p-3 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
-          <span>ডিজিটাল কম্পিউটার শপ ক্লাউড ও লোকাল স্টোরেজ সিঙ্ক</span>
+          <span>ডিজিটাল কম্পিউটার শপ ও স্টুডিও সিস্টেম</span>
           <button
             onClick={onClose}
-            className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-md"
+            className="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-md cursor-pointer"
           >
             বন্ধ করুন
           </button>

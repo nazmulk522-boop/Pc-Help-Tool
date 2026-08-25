@@ -29,7 +29,15 @@ function MainApp() {
   // Voter Database Upload Admin Modal State
   const [voterDbModalOpen, setVoterDbModalOpen] = useState(false);
 
-  const { currentProfile, isSuperAdmin } = useShopAuth();
+  const { currentProfile, isSuperAdmin, ipMismatchError, isLoggedIn, isLoadingAuth } = useShopAuth();
+
+  // If IP mismatch occurred, open the login modal automatically with warning
+  React.useEffect(() => {
+    if (ipMismatchError) {
+      setLoginModalTab('shop_login');
+      setLoginModalOpen(true);
+    }
+  }, [ipMismatchError]);
 
   const handleOpenLoginModal = (tab: 'shop_login' | 'admin_login' | 'profile' = 'shop_login') => {
     setLoginModalTab(tab);

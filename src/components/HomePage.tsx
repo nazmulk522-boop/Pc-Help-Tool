@@ -232,19 +232,29 @@ export const HomePage: React.FC<HomePageProps> = ({
             {isLoggedIn ? (
               <button
                 onClick={() => onOpenLoginModal('profile')}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95 cursor-pointer"
               >
                 <Edit3 className="w-4 h-4 text-amber-300" />
                 <span>দোকানের নাম ও তথ্য পরিবর্তন</span>
               </button>
             ) : (
-              <button
-                onClick={() => onOpenLoginModal('shop_login')}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95"
-              >
-                <Store className="w-4 h-4 text-white" />
-                <span>দোকান লগইন / নাম পরিবর্তন</span>
-              </button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  onClick={() => onOpenLoginModal('shop_login')}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95 cursor-pointer"
+                  title="দোকানদার লগইন"
+                >
+                  <Store className="w-4 h-4 text-white" />
+                  <span>দোকানদার লগইন</span>
+                </button>
+                <button
+                  onClick={() => onOpenLoginModal('profile')}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm shadow-lg transition active:scale-95 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-white" />
+                  <span>নতুন রেজিস্ট্রেশন</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

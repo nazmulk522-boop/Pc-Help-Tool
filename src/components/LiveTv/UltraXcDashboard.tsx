@@ -222,15 +222,17 @@ export const UltraXcDashboard: React.FC<UltraXcDashboardProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onOpenAdminModal}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 text-xs font-bold transition shadow-lg shadow-amber-950/40 cursor-pointer active:scale-95 shrink-0"
-            title="Xtream Codes API ও M3U প্লেলিস্ট কনফিগার করুন"
-          >
-            <Settings className="w-4 h-4" />
-            <span className="hidden sm:inline">Xtream / M3U API</span>
-            <span className="sm:hidden">সেটিংস</span>
-          </button>
+          {isSuperAdmin && (
+            <button
+              onClick={onOpenAdminModal}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 text-xs font-bold transition shadow-lg shadow-amber-950/40 cursor-pointer active:scale-95 shrink-0"
+              title="Xtream Codes API ও M3U প্লেলিস্ট কনফিগারেশন (সুপার এডমিন)"
+            >
+              <Settings className="w-4 h-4" />
+              <span className="hidden sm:inline">Xtream / M3U API</span>
+              <span className="sm:hidden">সেটিংস</span>
+            </button>
+          )}
         </div>
       </div>
 
